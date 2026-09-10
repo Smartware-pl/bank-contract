@@ -116,6 +116,8 @@ Broker: Redpanda (Kafka API). Serializacja: JSON (UTF-8), jedna koperta dla wszy
 ```
 
 `id` służy do deduplikacji w inboxie konsumenta. `causationId` = `id` zdarzenia, które wywołało to zdarzenie (np. `clearing.settled` → `payment.settled`), do śledzenia łańcuchów.
+Schemat koperty: `asyncapi/schemas/envelope.json`. Nagłówki Kafka (`type`, `version` jako tekst, `correlationId`): `asyncapi/schemas/kafka-headers.json`.
+DLQ konsumenta: `bank.<domena>.v1.dlq` (partycję wybiera producent), ten sam rekord co oryginał plus nagłówki wyjątku Spring Kafka.
 
 ### Tematy
 
@@ -147,7 +149,12 @@ Sufiks `.v1` to wersja *tematu*: zmienia się tylko przy niekompatybilnej zmiani
 | `clearing.settled` | clearing | clearingRef, paymentId, settledAt | core-api → płatność `SETTLED`, publikuje `payment.settled` |
 | `clearing.returned` | clearing | clearingRef, paymentId, reasonCode | core-api → storno, `RETURNED`, publikuje `payment.returned` |
 | `clearing.incoming_received` | clearing | clearingRef, debtorIban, debtorName, creditorIban, amount, title, valueDate | core-api → jeśli IBAN znany i rachunek nie `CLOSED`: `TRANSFER_IN`, publikuje `payment.incoming_credited`; inaczej: nic nie księguje, publikuje `payment.incoming_rejected` (clearing-sim symuluje zwrot do nadawcy) |
-| `payment.incoming_rejected` | payments | clearingRef, creditorIban, reasonCode | clearing-sim (log), notifications (nie) |
+| `payment.incoming_rejected` | payments | clearingRef, creditorIban, reasonCode, amount | clearing-sim (log), notifications (nie) |
+
+Nowe od 2026-09-10 (v0.3 AsyncAPI, addytywnie): zdarzenia konsumowane przez `notifications` niosą opcjonalne `customerId`, `email`
+oraz dane do treści maila (`amount`, `creditorName`, `title`, `reference`, `iban`) — bez nich konsument nie miałby adresata.
+`customer.created` ma opcjonalne `fullName`, `account.opened` — `email` i `productName`. Normatywny kształt: `asyncapi/schemas/payloads/<type>.json`,
+pełne zdarzenie z `const` na `type`/`version`/`producer`: `asyncapi/schemas/events/<type>.json`, przykłady: `asyncapi/examples/`.
 
 Kody powodu zwrotu (podzbiór ISO 20022): `AC01` błędny rachunek, `AC04` rachunek zamknięty, `AM04` brak środków (przez nas nigdy nie emitowany), `MS03` powód nieokreślony.
 

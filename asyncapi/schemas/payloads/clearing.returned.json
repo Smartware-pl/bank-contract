@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bank.local/schemas/payloads/clearing.returned.json",
+  "title": "ClearingReturnedPayload",
+  "description": "Izba zwróciła płatność wychodzącą. core-api → storno, `RETURNED`, publikuje `payment.returned`.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "clearingRef",
+    "paymentId",
+    "reasonCode"
+  ],
+  "properties": {
+    "clearingRef": {
+      "type": "string"
+    },
+    "paymentId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "reasonCode": {
+      "type": "string",
+      "enum": [
+        "AC01",
+        "AC04",
+        "AM04",
+        "MS03"
+      ]
+    }
+  }
+}

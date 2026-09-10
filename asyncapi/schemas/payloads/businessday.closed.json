@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bank.local/schemas/payloads/businessday.closed.json",
+  "title": "BusinessdayClosedPayload",
+  "description": "Zamknięto dzień biznesowy; następny jest OPEN. Dziś tylko do obserwacji (Console).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "businessDate",
+    "nextBusinessDate",
+    "jobRunId"
+  ],
+  "properties": {
+    "businessDate": {
+      "type": "string",
+      "format": "date"
+    },
+    "nextBusinessDate": {
+      "type": "string",
+      "format": "date"
+    },
+    "jobRunId": {
+      "type": "string",
+      "format": "uuid"
+    }
+  }
+}

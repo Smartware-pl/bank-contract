@@ -1,0 +1,488 @@
+# Generowane ze skryptu w PR (asyncapi/README.md); edytuj świadomie — schematy w schemas/ są normatywne.
+asyncapi: "3.0.0"
+id: "urn:bank:event-bus"
+info:
+  title: "bank event bus"
+  version: "0.3.0"
+  description: "Normatywny opis szyny zdarzeń (Redpanda, Kafka API) — docs/integration-contracts.md §4–5. Jedna koperta dla wszystkich zdarzeń (schemas/envelope.json), schemat payloadu per `type` (schemas/payloads/), pełny schemat zdarzenia (schemas/events/) używany w testach kontraktowych obu stron. Przez szynę idą wyłącznie fakty w czasie przeszłym; żadnych komend ani request-reply. Zmiany kompatybilne = nowe opcjonalne pole albo nowy `type`; niekompatybilne = `version`+1. Historia: v0.3 (2026-09-10) pierwsza wersja — 14 zdarzeń, 6 tematów; pola `email`/`customerId`/`amount` w `payment.*` i `interest.capitalized` dla notifications."
+  contact:
+    name: "bank-contract (CODEOWNERS)"
+defaultContentType: "application/json"
+servers:
+  redpanda-dev:
+    host: "redpanda:9092"
+    protocol: "kafka"
+    description: "Broker w docker-compose bank-infra (z hosta localhost:19092). Tematy tworzy bank-infra (`make topics`), nie aplikacje."
+channels:
+  customers:
+    address: "bank.customers.v1"
+    description: "Temat `bank.customers.v1`. Producent: core-api. Konsumenci: notifications. Klucz wiadomości = aggregateId. Retencja dev 7 dni. DLQ: `bank.customers.v1.dlq`."
+    messages:
+      customerCreated:
+        "$ref": "#/components/messages/customerCreated"
+    bindings:
+      kafka:
+        topic: "bank.customers.v1"
+        partitions: 1
+        topicConfiguration:
+          retention.ms: 604800000
+          cleanup.policy:
+            - "delete"
+        bindingVersion: "0.5.0"
+  accounts:
+    address: "bank.accounts.v1"
+    description: "Temat `bank.accounts.v1`. Producent: core-api. Konsumenci: notifications. Klucz wiadomości = aggregateId. Retencja dev 7 dni. DLQ: `bank.accounts.v1.dlq`."
+    messages:
+      accountOpened:
+        "$ref": "#/components/messages/accountOpened"
+    bindings:
+      kafka:
+        topic: "bank.accounts.v1"
+        partitions: 1
+        topicConfiguration:
+          retention.ms: 604800000
+          cleanup.policy:
+            - "delete"
+        bindingVersion: "0.5.0"
+  payments:
+    address: "bank.payments.v1"
+    description: "Temat `bank.payments.v1`. Producent: core-api. Konsumenci: notifications, clearing-sim. Klucz wiadomości = aggregateId. Retencja dev 7 dni. DLQ: `bank.payments.v1.dlq`."
+    messages:
+      paymentConfirmationRequested:
+        "$ref": "#/components/messages/paymentConfirmationRequested"
+      paymentPosted:
+        "$ref": "#/components/messages/paymentPosted"
+      paymentRejected:
+        "$ref": "#/components/messages/paymentRejected"
+      paymentSettled:
+        "$ref": "#/components/messages/paymentSettled"
+      paymentReturned:
+        "$ref": "#/components/messages/paymentReturned"
+      paymentIncomingCredited:
+        "$ref": "#/components/messages/paymentIncomingCredited"
+      paymentIncomingRejected:
+        "$ref": "#/components/messages/paymentIncomingRejected"
+    bindings:
+      kafka:
+        topic: "bank.payments.v1"
+        partitions: 1
+        topicConfiguration:
+          retention.ms: 604800000
+          cleanup.policy:
+            - "delete"
+        bindingVersion: "0.5.0"
+  interest:
+    address: "bank.interest.v1"
+    description: "Temat `bank.interest.v1`. Producent: core-api. Konsumenci: notifications. Klucz wiadomości = aggregateId. Retencja dev 7 dni. DLQ: `bank.interest.v1.dlq`."
+    messages:
+      interestCapitalized:
+        "$ref": "#/components/messages/interestCapitalized"
+    bindings:
+      kafka:
+        topic: "bank.interest.v1"
+        partitions: 1
+        topicConfiguration:
+          retention.ms: 604800000
+          cleanup.policy:
+            - "delete"
+        bindingVersion: "0.5.0"
+  batch:
+    address: "bank.batch.v1"
+    description: "Temat `bank.batch.v1`. Producent: core-api. Konsumenci: brak (obserwacja). Klucz wiadomości = aggregateId. Retencja dev 7 dni. DLQ: `bank.batch.v1.dlq`."
+    messages:
+      businessdayClosed:
+        "$ref": "#/components/messages/businessdayClosed"
+    bindings:
+      kafka:
+        topic: "bank.batch.v1"
+        partitions: 1
+        topicConfiguration:
+          retention.ms: 604800000
+          cleanup.policy:
+            - "delete"
+        bindingVersion: "0.5.0"
+  clearing:
+    address: "bank.clearing.v1"
+    description: "Temat `bank.clearing.v1`. Producent: clearing-sim. Konsumenci: core-api. Klucz wiadomości = aggregateId. Retencja dev 7 dni. DLQ: `bank.clearing.v1.dlq`."
+    messages:
+      clearingSettled:
+        "$ref": "#/components/messages/clearingSettled"
+      clearingReturned:
+        "$ref": "#/components/messages/clearingReturned"
+      clearingIncomingReceived:
+        "$ref": "#/components/messages/clearingIncomingReceived"
+    bindings:
+      kafka:
+        topic: "bank.clearing.v1"
+        partitions: 1
+        topicConfiguration:
+          retention.ms: 604800000
+          cleanup.policy:
+            - "delete"
+        bindingVersion: "0.5.0"
+operations:
+  core-apiPublishesCustomers:
+    action: "send"
+    channel:
+      "$ref": "#/channels/customers"
+    summary: "core-api publikuje na bank.customers.v1 (przez transactional outbox + relay)"
+    messages:
+      - "$ref": "#/channels/customers/messages/customerCreated"
+    bindings:
+      kafka:
+        bindingVersion: "0.5.0"
+  notificationsConsumesCustomers:
+    action: "receive"
+    channel:
+      "$ref": "#/channels/customers"
+    summary: "notifications konsumuje bank.customers.v1 (grupa `notifications`, inbox po `id`, nieznane `type` ignoruje, błąd → retry 3× → DLQ)"
+    messages:
+      - "$ref": "#/channels/customers/messages/customerCreated"
+    bindings:
+      kafka:
+        groupId:
+          type: "string"
+          enum:
+            - "notifications"
+        bindingVersion: "0.5.0"
+  core-apiPublishesAccounts:
+    action: "send"
+    channel:
+      "$ref": "#/channels/accounts"
+    summary: "core-api publikuje na bank.accounts.v1 (przez transactional outbox + relay)"
+    messages:
+      - "$ref": "#/channels/accounts/messages/accountOpened"
+    bindings:
+      kafka:
+        bindingVersion: "0.5.0"
+  notificationsConsumesAccounts:
+    action: "receive"
+    channel:
+      "$ref": "#/channels/accounts"
+    summary: "notifications konsumuje bank.accounts.v1 (grupa `notifications`, inbox po `id`, nieznane `type` ignoruje, błąd → retry 3× → DLQ)"
+    messages:
+      - "$ref": "#/channels/accounts/messages/accountOpened"
+    bindings:
+      kafka:
+        groupId:
+          type: "string"
+          enum:
+            - "notifications"
+        bindingVersion: "0.5.0"
+  core-apiPublishesPayments:
+    action: "send"
+    channel:
+      "$ref": "#/channels/payments"
+    summary: "core-api publikuje na bank.payments.v1 (przez transactional outbox + relay)"
+    messages:
+      - "$ref": "#/channels/payments/messages/paymentConfirmationRequested"
+      - "$ref": "#/channels/payments/messages/paymentPosted"
+      - "$ref": "#/channels/payments/messages/paymentRejected"
+      - "$ref": "#/channels/payments/messages/paymentSettled"
+      - "$ref": "#/channels/payments/messages/paymentReturned"
+      - "$ref": "#/channels/payments/messages/paymentIncomingCredited"
+      - "$ref": "#/channels/payments/messages/paymentIncomingRejected"
+    bindings:
+      kafka:
+        bindingVersion: "0.5.0"
+  notificationsConsumesPayments:
+    action: "receive"
+    channel:
+      "$ref": "#/channels/payments"
+    summary: "notifications konsumuje bank.payments.v1 (grupa `notifications`, inbox po `id`, nieznane `type` ignoruje, błąd → retry 3× → DLQ)"
+    messages:
+      - "$ref": "#/channels/payments/messages/paymentConfirmationRequested"
+      - "$ref": "#/channels/payments/messages/paymentPosted"
+      - "$ref": "#/channels/payments/messages/paymentRejected"
+      - "$ref": "#/channels/payments/messages/paymentSettled"
+      - "$ref": "#/channels/payments/messages/paymentReturned"
+      - "$ref": "#/channels/payments/messages/paymentIncomingCredited"
+    bindings:
+      kafka:
+        groupId:
+          type: "string"
+          enum:
+            - "notifications"
+        bindingVersion: "0.5.0"
+  clearing-simConsumesPayments:
+    action: "receive"
+    channel:
+      "$ref": "#/channels/payments"
+    summary: "clearing-sim konsumuje bank.payments.v1 (grupa `clearing-sim`, inbox po `id`, nieznane `type` ignoruje, błąd → retry 3× → DLQ)"
+    messages:
+      - "$ref": "#/channels/payments/messages/paymentPosted"
+      - "$ref": "#/channels/payments/messages/paymentIncomingRejected"
+    bindings:
+      kafka:
+        groupId:
+          type: "string"
+          enum:
+            - "clearing-sim"
+        bindingVersion: "0.5.0"
+  core-apiPublishesInterest:
+    action: "send"
+    channel:
+      "$ref": "#/channels/interest"
+    summary: "core-api publikuje na bank.interest.v1 (przez transactional outbox + relay)"
+    messages:
+      - "$ref": "#/channels/interest/messages/interestCapitalized"
+    bindings:
+      kafka:
+        bindingVersion: "0.5.0"
+  notificationsConsumesInterest:
+    action: "receive"
+    channel:
+      "$ref": "#/channels/interest"
+    summary: "notifications konsumuje bank.interest.v1 (grupa `notifications`, inbox po `id`, nieznane `type` ignoruje, błąd → retry 3× → DLQ)"
+    messages:
+      - "$ref": "#/channels/interest/messages/interestCapitalized"
+    bindings:
+      kafka:
+        groupId:
+          type: "string"
+          enum:
+            - "notifications"
+        bindingVersion: "0.5.0"
+  core-apiPublishesBatch:
+    action: "send"
+    channel:
+      "$ref": "#/channels/batch"
+    summary: "core-api publikuje na bank.batch.v1 (przez transactional outbox + relay)"
+    messages:
+      - "$ref": "#/channels/batch/messages/businessdayClosed"
+    bindings:
+      kafka:
+        bindingVersion: "0.5.0"
+  clearing-simPublishesClearing:
+    action: "send"
+    channel:
+      "$ref": "#/channels/clearing"
+    summary: "clearing-sim publikuje na bank.clearing.v1 (bezpośrednio, acks=all)"
+    messages:
+      - "$ref": "#/channels/clearing/messages/clearingSettled"
+      - "$ref": "#/channels/clearing/messages/clearingReturned"
+      - "$ref": "#/channels/clearing/messages/clearingIncomingReceived"
+    bindings:
+      kafka:
+        bindingVersion: "0.5.0"
+  core-apiConsumesClearing:
+    action: "receive"
+    channel:
+      "$ref": "#/channels/clearing"
+    summary: "core-api konsumuje bank.clearing.v1 (grupa `core-api-payments`, inbox po `id`, nieznane `type` ignoruje, błąd → retry 3× → DLQ)"
+    messages:
+      - "$ref": "#/channels/clearing/messages/clearingSettled"
+      - "$ref": "#/channels/clearing/messages/clearingReturned"
+      - "$ref": "#/channels/clearing/messages/clearingIncomingReceived"
+    bindings:
+      kafka:
+        groupId:
+          type: "string"
+          enum:
+            - "core-api-payments"
+        bindingVersion: "0.5.0"
+components:
+  messages:
+    customerCreated:
+      name: "customer.created"
+      title: "customer.created"
+      summary: "Utworzono klienta."
+      description: "Utworzono klienta. notifications → mail powitalny. Konsumenci: notifications."
+      contentType: "application/json"
+      headers:
+        "$ref": "./schemas/kafka-headers.json"
+      payload:
+        "$ref": "./schemas/events/customer.created.json"
+      examples:
+        - name: "przykład"
+          payload:
+            "$ref": "./examples/customer.created.json"
+    accountOpened:
+      name: "account.opened"
+      title: "account.opened"
+      summary: "Otwarto rachunek."
+      description: "Otwarto rachunek. notifications → mail z numerem rachunku. Konsumenci: notifications."
+      contentType: "application/json"
+      headers:
+        "$ref": "./schemas/kafka-headers.json"
+      payload:
+        "$ref": "./schemas/events/account.opened.json"
+      examples:
+        - name: "przykład"
+          payload:
+            "$ref": "./examples/account.opened.json"
+    paymentConfirmationRequested:
+      name: "payment.confirmation_requested"
+      title: "payment.confirmation_requested"
+      summary: "Płatność czeka na kod potwierdzenia."
+      description: "Płatność czeka na kod potwierdzenia. Jedyny payload z sekretem (`code` jawny) — core-api trzyma wyłącznie hash; konsument nie loguje payloadu. Konsumenci: notifications."
+      contentType: "application/json"
+      headers:
+        "$ref": "./schemas/kafka-headers.json"
+      payload:
+        "$ref": "./schemas/events/payment.confirmation_requested.json"
+      examples:
+        - name: "przykład"
+          payload:
+            "$ref": "./examples/payment.confirmation_requested.json"
+    paymentPosted:
+      name: "payment.posted"
+      title: "payment.posted"
+      summary: "Płatność zaksięgowana."
+      description: "Płatność zaksięgowana. notifications → mail; clearing-sim → dla `external=true` i `kind=EXTERNAL_OUT` publikuje po opóźnieniu `clearing.settled` albo `clearing.returned`. Konsumenci: notifications, clearing-sim."
+      contentType: "application/json"
+      headers:
+        "$ref": "./schemas/kafka-headers.json"
+      payload:
+        "$ref": "./schemas/events/payment.posted.json"
+      examples:
+        - name: "przykład"
+          payload:
+            "$ref": "./examples/payment.posted.json"
+    paymentRejected:
+      name: "payment.rejected"
+      title: "payment.rejected"
+      summary: "Płatność odrzucona (walidacja, wygasły kod, brak środków przy zleceniu stałym)."
+      description: "Płatność odrzucona (walidacja, wygasły kod, brak środków przy zleceniu stałym). Konsumenci: notifications."
+      contentType: "application/json"
+      headers:
+        "$ref": "./schemas/kafka-headers.json"
+      payload:
+        "$ref": "./schemas/events/payment.rejected.json"
+      examples:
+        - name: "przykład"
+          payload:
+            "$ref": "./examples/payment.rejected.json"
+    paymentSettled:
+      name: "payment.settled"
+      title: "payment.settled"
+      summary: "Izba rozliczyła płatność zewnętrzną (albo wewnętrzna rozliczona natychmiast)."
+      description: "Izba rozliczyła płatność zewnętrzną (albo wewnętrzna rozliczona natychmiast). Konsumenci: notifications."
+      contentType: "application/json"
+      headers:
+        "$ref": "./schemas/kafka-headers.json"
+      payload:
+        "$ref": "./schemas/events/payment.settled.json"
+      examples:
+        - name: "przykład"
+          payload:
+            "$ref": "./examples/payment.settled.json"
+    paymentReturned:
+      name: "payment.returned"
+      title: "payment.returned"
+      summary: "Zwrot z izby albo ręczny zwrot operatora; zaksięgowano storno."
+      description: "Zwrot z izby albo ręczny zwrot operatora; zaksięgowano storno. Konsumenci: notifications."
+      contentType: "application/json"
+      headers:
+        "$ref": "./schemas/kafka-headers.json"
+      payload:
+        "$ref": "./schemas/events/payment.returned.json"
+      examples:
+        - name: "przykład"
+          payload:
+            "$ref": "./examples/payment.returned.json"
+    paymentIncomingCredited:
+      name: "payment.incoming_credited"
+      title: "payment.incoming_credited"
+      summary: "Przelew przychodzący z izby uznał rachunek klienta."
+      description: "Przelew przychodzący z izby uznał rachunek klienta. Konsumenci: notifications."
+      contentType: "application/json"
+      headers:
+        "$ref": "./schemas/kafka-headers.json"
+      payload:
+        "$ref": "./schemas/events/payment.incoming_credited.json"
+      examples:
+        - name: "przykład"
+          payload:
+            "$ref": "./examples/payment.incoming_credited.json"
+    paymentIncomingRejected:
+      name: "payment.incoming_rejected"
+      title: "payment.incoming_rejected"
+      summary: "Przelew przychodzący odrzucony (nieznany IBAN albo rachunek `CLOSED`); nic nie zaksięgowano."
+      description: "Przelew przychodzący odrzucony (nieznany IBAN albo rachunek `CLOSED`); nic nie zaksięgowano. clearing-sim symuluje zwrot do nadawcy. Konsumenci: clearing-sim."
+      contentType: "application/json"
+      headers:
+        "$ref": "./schemas/kafka-headers.json"
+      payload:
+        "$ref": "./schemas/events/payment.incoming_rejected.json"
+      examples:
+        - name: "przykład"
+          payload:
+            "$ref": "./examples/payment.incoming_rejected.json"
+    interestCapitalized:
+      name: "interest.capitalized"
+      title: "interest.capitalized"
+      summary: "Kapitalizacja odsetek na rachunku (gross, podatek, net)."
+      description: "Kapitalizacja odsetek na rachunku (gross, podatek, net). Konsumenci: notifications."
+      contentType: "application/json"
+      headers:
+        "$ref": "./schemas/kafka-headers.json"
+      payload:
+        "$ref": "./schemas/events/interest.capitalized.json"
+      examples:
+        - name: "przykład"
+          payload:
+            "$ref": "./examples/interest.capitalized.json"
+    businessdayClosed:
+      name: "businessday.closed"
+      title: "businessday.closed"
+      summary: "Zamknięto dzień biznesowy; następny jest OPEN."
+      description: "Zamknięto dzień biznesowy; następny jest OPEN. Dziś tylko do obserwacji (Console). Bez konsumentów (obserwacja w Redpanda Console)."
+      contentType: "application/json"
+      headers:
+        "$ref": "./schemas/kafka-headers.json"
+      payload:
+        "$ref": "./schemas/events/businessday.closed.json"
+      examples:
+        - name: "przykład"
+          payload:
+            "$ref": "./examples/businessday.closed.json"
+    clearingSettled:
+      name: "clearing.settled"
+      title: "clearing.settled"
+      summary: "Izba rozliczyła płatność wychodzącą."
+      description: "Izba rozliczyła płatność wychodzącą. core-api → `SETTLED`, publikuje `payment.settled`. Konsumenci: core-api."
+      contentType: "application/json"
+      headers:
+        "$ref": "./schemas/kafka-headers.json"
+      payload:
+        "$ref": "./schemas/events/clearing.settled.json"
+      examples:
+        - name: "przykład"
+          payload:
+            "$ref": "./examples/clearing.settled.json"
+    clearingReturned:
+      name: "clearing.returned"
+      title: "clearing.returned"
+      summary: "Izba zwróciła płatność wychodzącą."
+      description: "Izba zwróciła płatność wychodzącą. core-api → storno, `RETURNED`, publikuje `payment.returned`. Konsumenci: core-api."
+      contentType: "application/json"
+      headers:
+        "$ref": "./schemas/kafka-headers.json"
+      payload:
+        "$ref": "./schemas/events/clearing.returned.json"
+      examples:
+        - name: "przykład"
+          payload:
+            "$ref": "./examples/clearing.returned.json"
+    clearingIncomingReceived:
+      name: "clearing.incoming_received"
+      title: "clearing.incoming_received"
+      summary: "Przelew przychodzący z izby."
+      description: "Przelew przychodzący z izby. core-api → `TRANSFER_IN` + `payment.incoming_credited` albo `payment.incoming_rejected`. Konsumenci: core-api."
+      contentType: "application/json"
+      headers:
+        "$ref": "./schemas/kafka-headers.json"
+      payload:
+        "$ref": "./schemas/events/clearing.incoming_received.json"
+      examples:
+        - name: "przykład"
+          payload:
+            "$ref": "./examples/clearing.incoming_received.json"
+  schemas:
+    EventEnvelope:
+      "$ref": "./schemas/envelope.json"
+    Money:
+      "$ref": "./schemas/money.json"
+    KafkaHeaders:
+      "$ref": "./schemas/kafka-headers.json"

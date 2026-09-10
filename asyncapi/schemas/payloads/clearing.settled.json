@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bank.local/schemas/payloads/clearing.settled.json",
+  "title": "ClearingSettledPayload",
+  "description": "Izba rozliczyła płatność wychodzącą. core-api → `SETTLED`, publikuje `payment.settled`.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "clearingRef",
+    "paymentId",
+    "settledAt"
+  ],
+  "properties": {
+    "clearingRef": {
+      "type": "string",
+      "description": "CLR-<yyyy>-<6 cyfr>"
+    },
+    "paymentId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "settledAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bank.local/schemas/payloads/payment.rejected.json",
+  "title": "PaymentRejectedPayload",
+  "description": "Płatność odrzucona (walidacja, wygasły kod, brak środków przy zleceniu stałym).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "paymentId",
+    "reason"
+  ],
+  "properties": {
+    "paymentId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "reason": {
+      "type": "string",
+      "description": "Slug problemu (`insufficient-funds`, `confirmation-expired`, …)"
+    },
+    "customerId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "email": {
+      "type": "string",
+      "format": "email",
+      "description": "Adres odbiorcy wiadomości — jedyne PII poza identyfikatorami; obecne tylko w zdarzeniach konsumowanych przez notifications"
+    },
+    "amount": {
+      "$ref": "../money.json"
+    },
+    "creditorName": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "reference": {
+      "type": "string"
+    }
+  }
+}

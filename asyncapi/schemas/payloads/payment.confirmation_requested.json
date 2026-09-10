@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bank.local/schemas/payloads/payment.confirmation_requested.json",
+  "title": "PaymentConfirmationRequestedPayload",
+  "description": "Płatność czeka na kod potwierdzenia. Jedyny payload z sekretem (`code` jawny) — core-api trzyma wyłącznie hash; konsument nie loguje payloadu.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "paymentId",
+    "customerId",
+    "email",
+    "code",
+    "expiresAt",
+    "amount"
+  ],
+  "properties": {
+    "paymentId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "customerId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "email": {
+      "type": "string",
+      "format": "email",
+      "description": "Adres odbiorcy wiadomości — jedyne PII poza identyfikatorami; obecne tylko w zdarzeniach konsumowanych przez notifications"
+    },
+    "code": {
+      "type": "string",
+      "pattern": "^[0-9]{6}$",
+      "description": "Kod potwierdzenia — sekret, nie logować"
+    },
+    "expiresAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "amount": {
+      "$ref": "../money.json"
+    },
+    "creditorName": {
+      "type": "string"
+    },
+    "creditorIban": {
+      "type": "string",
+      "minLength": 15,
+      "maxLength": 34,
+      "description": "IBAN bez spacji"
+    },
+    "title": {
+      "type": "string"
+    },
+    "reference": {
+      "type": "string",
+      "description": "PAY-<yyyymmdd>-<6 base32>"
+    }
+  }
+}

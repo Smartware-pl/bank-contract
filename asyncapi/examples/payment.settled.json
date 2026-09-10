@@ -1,6 +1,6 @@
 {
   "id": "0191f7a0-6c3e-7b2a-9f00-1234567890ab",
-  "type": "payment.posted",
+  "type": "payment.settled",
   "version": 1,
   "occurredAt": "2026-09-08T10:15:30Z",
   "businessDate": "2026-09-08",
@@ -8,23 +8,17 @@
   "aggregateType": "Payment",
   "aggregateId": "0191f7a0-5b1d-7c3e-8a00-abcdefabcdef",
   "correlationId": "0191f7a0-4a0c-7d4f-9b00-fedcbafedcba",
-  "causationId": null,
+  "causationId": "0191f7a0-6c3e-7b2a-9f00-000000000001",
   "payload": {
     "paymentId": "0191f7a0-5b1d-7c3e-8a00-abcdefabcdef",
-    "kind": "EXTERNAL_OUT",
-    "debtorAccountId": "0191f7a0-1111-7000-8000-000000000001",
-    "debtorIban": "PL61100000000000000000000001",
-    "creditorIban": "PL27114020040000300201355387",
-    "creditorName": "Anna Nowak",
+    "clearingRef": "CLR-2026-000123",
+    "customerId": "0191f7a0-0001-7000-8000-000000000001",
+    "email": "jan.kowalski@example.com",
     "amount": {
       "minor": 12345,
       "currency": "PLN"
     },
-    "title": "Faktura 12/2026",
-    "businessDate": "2026-09-08",
-    "external": true,
-    "customerId": "0191f7a0-0001-7000-8000-000000000001",
-    "email": "jan.kowalski@example.com",
+    "creditorName": "Anna Nowak",
     "reference": "PAY-20260908-7K3M2Q"
   }
 }

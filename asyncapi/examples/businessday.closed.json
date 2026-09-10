@@ -1,0 +1,17 @@
+{
+  "id": "0191f7a0-6c3e-7b2a-9f00-1234567890ab",
+  "type": "businessday.closed",
+  "version": 1,
+  "occurredAt": "2026-09-08T10:15:30Z",
+  "businessDate": "2026-09-08",
+  "producer": "core-api",
+  "aggregateType": "BusinessDay",
+  "aggregateId": "2026-09-08",
+  "correlationId": "0191f7a0-4a0c-7d4f-9b00-fedcbafedcba",
+  "causationId": null,
+  "payload": {
+    "businessDate": "2026-09-08",
+    "nextBusinessDate": "2026-09-09",
+    "jobRunId": "0191f7a0-3333-7000-8000-000000000001"
+  }
+}

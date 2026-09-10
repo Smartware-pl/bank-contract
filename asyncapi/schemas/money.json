@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bank.local/schemas/money.json",
+  "title": "Money",
+  "description": "Kwota w jednostkach mniejszych (grosze) + kod ISO 4217. Nigdy liczby zmiennoprzecinkowe.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "minor",
+    "currency"
+  ],
+  "properties": {
+    "minor": {
+      "type": "integer",
+      "existingJavaType": "java.lang.Long",
+      "description": "Grosze; znak wg kontekstu pola"
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$"
+    }
+  }
+}

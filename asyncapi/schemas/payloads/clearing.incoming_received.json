@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bank.local/schemas/payloads/clearing.incoming_received.json",
+  "title": "ClearingIncomingReceivedPayload",
+  "description": "Przelew przychodzący z izby. core-api → `TRANSFER_IN` + `payment.incoming_credited` albo `payment.incoming_rejected`.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "clearingRef",
+    "debtorIban",
+    "debtorName",
+    "creditorIban",
+    "amount",
+    "title",
+    "valueDate"
+  ],
+  "properties": {
+    "clearingRef": {
+      "type": "string"
+    },
+    "debtorIban": {
+      "type": "string",
+      "minLength": 15,
+      "maxLength": 34,
+      "description": "IBAN bez spacji"
+    },
+    "debtorName": {
+      "type": "string"
+    },
+    "creditorIban": {
+      "type": "string",
+      "minLength": 15,
+      "maxLength": 34,
+      "description": "IBAN bez spacji"
+    },
+    "amount": {
+      "$ref": "../money.json"
+    },
+    "title": {
+      "type": "string"
+    },
+    "valueDate": {
+      "type": "string",
+      "format": "date"
+    }
+  }
+}

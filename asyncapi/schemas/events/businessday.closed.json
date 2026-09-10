@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bank.local/schemas/events/businessday.closed.json",
+  "title": "BusinessdayClosedEvent",
+  "description": "Koperta zdarzenia `businessday.closed` (version 1).",
+  "allOf": [
+    {
+      "$ref": "../envelope.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "businessday.closed"
+        },
+        "version": {
+          "const": 1
+        },
+        "producer": {
+          "const": "core-api"
+        },
+        "aggregateType": {
+          "const": "BusinessDay"
+        },
+        "payload": {
+          "$ref": "../payloads/businessday.closed.json"
+        }
+      }
+    }
+  ]
+}

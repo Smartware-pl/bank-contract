@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bank.local/schemas/events/payment.settled.json",
+  "title": "PaymentSettledEvent",
+  "description": "Koperta zdarzenia `payment.settled` (version 1).",
+  "allOf": [
+    {
+      "$ref": "../envelope.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "payment.settled"
+        },
+        "version": {
+          "const": 1
+        },
+        "producer": {
+          "const": "core-api"
+        },
+        "aggregateType": {
+          "const": "Payment"
+        },
+        "payload": {
+          "$ref": "../payloads/payment.settled.json"
+        }
+      }
+    }
+  ]
+}

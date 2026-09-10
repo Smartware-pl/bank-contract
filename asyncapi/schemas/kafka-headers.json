@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bank.local/schemas/kafka-headers.json",
+  "title": "KafkaHeaders",
+  "description": "Nagłówki Kafka duplikujące pola koperty — do filtrowania bez deserializacji.",
+  "type": "object",
+  "required": [
+    "type",
+    "version",
+    "correlationId"
+  ],
+  "properties": {
+    "type": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string",
+      "description": "Liczba jako tekst"
+    },
+    "correlationId": {
+      "type": "string",
+      "format": "uuid"
+    }
+  }
+}

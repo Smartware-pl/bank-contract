@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bank.local/schemas/payloads/payment.settled.json",
+  "title": "PaymentSettledPayload",
+  "description": "Izba rozliczyła płatność zewnętrzną (albo wewnętrzna rozliczona natychmiast).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "paymentId"
+  ],
+  "properties": {
+    "paymentId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "clearingRef": {
+      "type": "string"
+    },
+    "customerId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "email": {
+      "type": "string",
+      "format": "email",
+      "description": "Adres odbiorcy wiadomości — jedyne PII poza identyfikatorami; obecne tylko w zdarzeniach konsumowanych przez notifications"
+    },
+    "amount": {
+      "$ref": "../money.json"
+    },
+    "creditorName": {
+      "type": "string"
+    },
+    "reference": {
+      "type": "string"
+    }
+  }
+}

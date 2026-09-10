@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bank.local/schemas/envelope.json",
+  "title": "EventEnvelope",
+  "description": "Wspólna koperta wszystkich zdarzeń (docs/integration-contracts.md §4). Konsument deduplikuje po `id`; klucz partycji = `aggregateId`.",
+  "type": "object",
+  "required": [
+    "id",
+    "type",
+    "version",
+    "occurredAt",
+    "businessDate",
+    "producer",
+    "aggregateType",
+    "aggregateId",
+    "correlationId",
+    "payload"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUID v7 — do deduplikacji w inboxie"
+    },
+    "type": {
+      "type": "string",
+      "pattern": "^[a-z]+\\.[a-z_]+$",
+      "description": "Nazwa zdarzenia w czasie przeszłym, np. payment.posted"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Wersja zdarzenia; zmiana niekompatybilna = +1"
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 UTC"
+    },
+    "businessDate": {
+      "type": "string",
+      "format": "date"
+    },
+    "producer": {
+      "type": "string",
+      "enum": [
+        "core-api",
+        "clearing-sim"
+      ]
+    },
+    "aggregateType": {
+      "type": "string"
+    },
+    "aggregateId": {
+      "type": "string",
+      "description": "Klucz partycji; kolejność gwarantowana tylko w jego obrębie"
+    },
+    "correlationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "causationId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid",
+      "description": "id zdarzenia, które wywołało to zdarzenie"
+    },
+    "payload": {
+      "type": "object",
+      "existingJavaType": "com.fasterxml.jackson.databind.JsonNode",
+      "description": "Schemat zależy od `type` — schemas/payloads/<type>.json"
+    }
+  }
+}

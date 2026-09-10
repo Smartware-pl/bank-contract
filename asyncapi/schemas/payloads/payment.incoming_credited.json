@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bank.local/schemas/payloads/payment.incoming_credited.json",
+  "title": "PaymentIncomingCreditedPayload",
+  "description": "Przelew przychodzący z izby uznał rachunek klienta.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "paymentId",
+    "creditorAccountId",
+    "amount",
+    "debtorName",
+    "title"
+  ],
+  "properties": {
+    "paymentId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "creditorAccountId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "amount": {
+      "$ref": "../money.json"
+    },
+    "debtorName": {
+      "type": "string"
+    },
+    "debtorIban": {
+      "type": "string",
+      "minLength": 15,
+      "maxLength": 34,
+      "description": "IBAN bez spacji"
+    },
+    "title": {
+      "type": "string"
+    },
+    "customerId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "email": {
+      "type": "string",
+      "format": "email",
+      "description": "Adres odbiorcy wiadomości — jedyne PII poza identyfikatorami; obecne tylko w zdarzeniach konsumowanych przez notifications"
+    },
+    "creditorIban": {
+      "type": "string",
+      "minLength": 15,
+      "maxLength": 34,
+      "description": "IBAN bez spacji"
+    },
+    "reference": {
+      "type": "string"
+    }
+  }
+}

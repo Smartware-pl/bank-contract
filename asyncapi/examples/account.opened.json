@@ -1,0 +1,20 @@
+{
+  "id": "0191f7a0-6c3e-7b2a-9f00-1234567890ab",
+  "type": "account.opened",
+  "version": 1,
+  "occurredAt": "2026-09-08T10:15:30Z",
+  "businessDate": "2026-09-08",
+  "producer": "core-api",
+  "aggregateType": "Account",
+  "aggregateId": "0191f7a0-1111-7000-8000-000000000001",
+  "correlationId": "0191f7a0-4a0c-7d4f-9b00-fedcbafedcba",
+  "causationId": null,
+  "payload": {
+    "accountId": "0191f7a0-1111-7000-8000-000000000001",
+    "customerId": "0191f7a0-0001-7000-8000-000000000001",
+    "email": "jan.kowalski@example.com",
+    "iban": "PL61100000000000000000000001",
+    "productCode": "SAVINGS_STD",
+    "productName": "Konto oszczędnościowe"
+  }
+}

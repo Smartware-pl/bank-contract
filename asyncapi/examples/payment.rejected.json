@@ -1,6 +1,6 @@
 {
   "id": "0191f7a0-6c3e-7b2a-9f00-1234567890ab",
-  "type": "payment.posted",
+  "type": "payment.rejected",
   "version": 1,
   "occurredAt": "2026-09-08T10:15:30Z",
   "businessDate": "2026-09-08",
@@ -11,20 +11,15 @@
   "causationId": null,
   "payload": {
     "paymentId": "0191f7a0-5b1d-7c3e-8a00-abcdefabcdef",
-    "kind": "EXTERNAL_OUT",
-    "debtorAccountId": "0191f7a0-1111-7000-8000-000000000001",
-    "debtorIban": "PL61100000000000000000000001",
-    "creditorIban": "PL27114020040000300201355387",
-    "creditorName": "Anna Nowak",
+    "reason": "insufficient-funds",
+    "customerId": "0191f7a0-0001-7000-8000-000000000001",
+    "email": "jan.kowalski@example.com",
     "amount": {
       "minor": 12345,
       "currency": "PLN"
     },
+    "creditorName": "Anna Nowak",
     "title": "Faktura 12/2026",
-    "businessDate": "2026-09-08",
-    "external": true,
-    "customerId": "0191f7a0-0001-7000-8000-000000000001",
-    "email": "jan.kowalski@example.com",
     "reference": "PAY-20260908-7K3M2Q"
   }
 }

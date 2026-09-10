@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bank.local/schemas/payloads/payment.incoming_rejected.json",
+  "title": "PaymentIncomingRejectedPayload",
+  "description": "Przelew przychodzący odrzucony (nieznany IBAN albo rachunek `CLOSED`); nic nie zaksięgowano. clearing-sim symuluje zwrot do nadawcy.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "clearingRef",
+    "creditorIban",
+    "reasonCode"
+  ],
+  "properties": {
+    "clearingRef": {
+      "type": "string"
+    },
+    "creditorIban": {
+      "type": "string",
+      "minLength": 15,
+      "maxLength": 34,
+      "description": "IBAN bez spacji"
+    },
+    "reasonCode": {
+      "type": "string",
+      "enum": [
+        "AC01",
+        "AC04",
+        "MS03"
+      ]
+    },
+    "amount": {
+      "$ref": "../money.json"
+    }
+  }
+}

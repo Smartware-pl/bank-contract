@@ -1,0 +1,21 @@
+{
+  "id": "0191f7a0-6c3e-7b2a-9f00-1234567890ab",
+  "type": "payment.incoming_rejected",
+  "version": 1,
+  "occurredAt": "2026-09-08T10:15:30Z",
+  "businessDate": "2026-09-08",
+  "producer": "core-api",
+  "aggregateType": "Payment",
+  "aggregateId": "CLR-2026-000123",
+  "correlationId": "0191f7a0-4a0c-7d4f-9b00-fedcbafedcba",
+  "causationId": "0191f7a0-6c3e-7b2a-9f00-000000000001",
+  "payload": {
+    "clearingRef": "CLR-2026-000123",
+    "creditorIban": "PL61100000000000000000000099",
+    "reasonCode": "AC01",
+    "amount": {
+      "minor": 12345,
+      "currency": "PLN"
+    }
+  }
+}

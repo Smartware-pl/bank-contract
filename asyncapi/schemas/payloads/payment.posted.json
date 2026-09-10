@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bank.local/schemas/payloads/payment.posted.json",
+  "title": "PaymentPostedPayload",
+  "description": "Płatność zaksięgowana. notifications → mail; clearing-sim → dla `external=true` i `kind=EXTERNAL_OUT` publikuje po opóźnieniu `clearing.settled` albo `clearing.returned`.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "paymentId",
+    "kind",
+    "debtorAccountId",
+    "debtorIban",
+    "creditorIban",
+    "creditorName",
+    "amount",
+    "title",
+    "businessDate",
+    "external"
+  ],
+  "properties": {
+    "paymentId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "INTERNAL",
+        "EXTERNAL_OUT",
+        "EXTERNAL_IN"
+      ]
+    },
+    "debtorAccountId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "debtorIban": {
+      "type": "string",
+      "minLength": 15,
+      "maxLength": 34,
+      "description": "IBAN bez spacji"
+    },
+    "creditorIban": {
+      "type": "string",
+      "minLength": 15,
+      "maxLength": 34,
+      "description": "IBAN bez spacji"
+    },
+    "creditorName": {
+      "type": "string"
+    },
+    "amount": {
+      "$ref": "../money.json"
+    },
+    "title": {
+      "type": "string"
+    },
+    "businessDate": {
+      "type": "string",
+      "format": "date"
+    },
+    "external": {
+      "type": "boolean",
+      "description": "true = odbiorca poza bankiem (idzie do izby)"
+    },
+    "customerId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "email": {
+      "type": "string",
+      "format": "email",
+      "description": "Adres odbiorcy wiadomości — jedyne PII poza identyfikatorami; obecne tylko w zdarzeniach konsumowanych przez notifications"
+    },
+    "reference": {
+      "type": "string"
+    }
+  }
+}

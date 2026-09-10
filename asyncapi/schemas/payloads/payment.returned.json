@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bank.local/schemas/payloads/payment.returned.json",
+  "title": "PaymentReturnedPayload",
+  "description": "Zwrot z izby albo ręczny zwrot operatora; zaksięgowano storno.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "paymentId",
+    "reasonCode",
+    "reversalEntryId"
+  ],
+  "properties": {
+    "paymentId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "reasonCode": {
+      "type": "string",
+      "enum": [
+        "AC01",
+        "AC04",
+        "AM04",
+        "MS03"
+      ]
+    },
+    "reversalEntryId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "customerId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "email": {
+      "type": "string",
+      "format": "email",
+      "description": "Adres odbiorcy wiadomości — jedyne PII poza identyfikatorami; obecne tylko w zdarzeniach konsumowanych przez notifications"
+    },
+    "amount": {
+      "$ref": "../money.json"
+    },
+    "creditorName": {
+      "type": "string"
+    },
+    "reference": {
+      "type": "string"
+    }
+  }
+}
