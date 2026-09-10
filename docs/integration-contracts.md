@@ -45,6 +45,8 @@ Konwencje:
 - Daty: `YYYY-MM-DD`; chwile: RFC 3339 UTC.
 - Błędy: `application/problem+json`, `type` to `https://bank.local/problems/<slug>`. Stabilne slugi:
   `validation`, `not-found`, `forbidden`, `insufficient-funds`, `limit-exceeded`, `duplicate-request`, `conflict`, `business-day-closed`, `invalid-iban`, `unbalanced-entry`.
+  Nowe od 2026-09-10: `confirmation-failed` (błędny kod; `extensions.attemptsLeft`), `confirmation-expired` (kod wygasł lub próby wyczerpane; płatność `REJECTED`).
+  `Problem` niesie dodatkowo `correlationId` (UI pokazuje go przy nieznanym slugu), `errors[]{field,message}` dla `validation` oraz `extensions` (pola specyficzne dla slugu).
 - Paginacja: `?cursor=&limit=` → `{ "items": [], "nextCursor": "…|null" }`.
 
 Grupy zasobów (tagi OpenAPI w nawiasach):
@@ -52,9 +54,9 @@ Grupy zasobów (tagi OpenAPI w nawiasach):
 | Ścieżka | Role | Cel |
 |---|---|---|
 | `/me` [customer] | CUSTOMER | Własny profil klienta |
-| `/me/accounts`, `/me/accounts/{id}`, `/me/accounts/{id}/transactions` [customer] | CUSTOMER | Własne rachunki i historia (odczyt księgi przez `accounts`) |
-| `/me/payments`, `/me/payments/{id}`, `/me/payments/{id}/confirm` [customer] | CUSTOMER | Utworzenie przelewu, potwierdzenie kodem z e-maila, śledzenie statusu |
-| `/me/standing-orders` [customer] | CUSTOMER | CRUD zleceń stałych |
+| `/me/accounts`, `/me/accounts/{id}`, `/me/accounts/{id}/transactions` [customer] | CUSTOMER | Własne rachunki i historia (odczyt księgi przez `accounts`); kwoty w historii ze znakiem z perspektywy klienta (dodatni = uznanie); obcy rachunek → `404`, nie `403` |
+| `/me/payments`, `/me/payments/{id}`, `/me/payments/{id}/confirm` [customer] | CUSTOMER | Lista i utworzenie przelewu (`kind` ustala serwer po IBAN-ie odbiorcy), potwierdzenie kodem z e-maila, śledzenie statusu (UI odpytuje `GET` do stanu terminalnego) |
+| `/me/standing-orders`, `/me/standing-orders/{id}` [customer] | CUSTOMER | Zlecenia stałe: lista/utworzenie, odczyt/zmiana (`PUT` z `version`)/anulowanie (`DELETE` → `CANCELLED`) |
 | `/customers`, `/customers/{id}`, `/customers/{id}/accounts` [operator] | OPERATOR, ADMIN | Administracja klientami, otwieranie rachunków |
 | `/accounts/{id}`, `/accounts/{id}/holds` [operator] | OPERATOR, ADMIN | Szczegóły rachunku, ręczne blokady |
 | `/payments/{id}`, `/payments/{id}/return` [operator] | OPERATOR, ADMIN | Podgląd płatności, ręczny zwrot |

@@ -1,0 +1,863 @@
+openapi: 3.1.0
+info:
+  title: bank core-api
+  version: 0.1.0
+  description: |
+    Kontrakt REST `core-api` (`/api/v1`). Normatywny dla wszystkich aplikacji webowych; klienty generują się
+    z tego pliku w czasie builda (`docs/architecture.md` §1a). Zmiany są wyłącznie addytywne
+    (`docs/integration-contracts.md` §3).
+
+    Tagi: `customer` (rola CUSTOMER, używa `customer-web`), `operator`/`admin` (`backoffice-web`).
+    W tej wersji opisane są endpointy `customer`; `operator`/`admin` dochodzą w kolejnych PR-ach.
+
+    Konwencje:
+    - kwoty `Money = {minor, currency}`; nigdy liczby zmiennoprzecinkowe;
+    - daty `YYYY-MM-DD`, chwile RFC 3339 w UTC;
+    - błędy `application/problem+json` ze stabilnym `type` `https://bank.local/problems/<slug>`;
+    - paginacja kursorowa `?cursor=&limit=` → `{items, nextCursor}`;
+    - każde żądanie mutujące wymaga nagłówka `Idempotency-Key` (UUID); powtórzenie zwraca oryginalny wynik.
+servers:
+  - url: http://localhost:8080/api/v1
+    description: dev (compose / lokalnie)
+tags:
+  - name: customer
+    description: Endpointy klienta (`/me/*`), rola `CUSTOMER`. Klient widzi wyłącznie własne zasoby.
+  - name: operator
+    description: Konsola operatora (`OPERATOR`, `ADMIN`). Opisane w kolejnych wersjach kontraktu.
+  - name: admin
+    description: Administracja (`ADMIN`). Opisane w kolejnych wersjach kontraktu.
+security:
+  - bearerAuth: []
+
+paths:
+  /me:
+    get:
+      tags: [customer]
+      operationId: getMe
+      summary: Profil zalogowanego klienta
+      description: Klient jest identyfikowany przez claim `sub` tokenu (mapowany na `customer.keycloak_sub`).
+      responses:
+        "200":
+          description: Profil klienta
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /me/accounts:
+    get:
+      tags: [customer]
+      operationId: listMyAccounts
+      summary: Rachunki zalogowanego klienta
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Strona rachunków
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountPage"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /me/accounts/{accountId}:
+    parameters:
+      - $ref: "#/components/parameters/AccountId"
+    get:
+      tags: [customer]
+      operationId: getMyAccount
+      summary: Szczegóły własnego rachunku
+      description: Rachunek innego klienta zwraca `404` (`not-found`), nie `403`, żeby nie ujawniać istnienia zasobu.
+      responses:
+        "200":
+          description: Rachunek
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /me/accounts/{accountId}/transactions:
+    parameters:
+      - $ref: "#/components/parameters/AccountId"
+    get:
+      tags: [customer]
+      operationId: listMyAccountTransactions
+      summary: Historia rachunku
+      description: |
+        Pozycje wyprowadzone z postingów na subkoncie GL rachunku, od najnowszej. `amount.minor` jest ze znakiem
+        z perspektywy klienta: dodatni = uznanie rachunku, ujemny = obciążenie. `balanceAfter` to saldo księgowe
+        po tej pozycji. Filtry dat dotyczą `bookingDate` (obustronnie domknięte).
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: Najwcześniejsza `bookingDate` (włącznie)
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: Najpóźniejsza `bookingDate` (włącznie)
+      responses:
+        "200":
+          description: Strona historii
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransactionPage"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /me/payments:
+    get:
+      tags: [customer]
+      operationId: listMyPayments
+      summary: Płatności zalogowanego klienta
+      description: Od najnowszej. Obejmuje płatności wychodzące z rachunków klienta oraz przychodzące na nie.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/PaymentStatus"
+          description: Filtr po statusie
+        - name: accountId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+          description: Tylko płatności powiązane z tym rachunkiem klienta
+      responses:
+        "200":
+          description: Strona płatności
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentPage"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [customer]
+      operationId: createMyPayment
+      summary: Utworzenie przelewu
+      description: |
+        Tworzy płatność w stanie `PENDING_CONFIRMATION`, zakłada blokadę na kwotę i publikuje
+        `payment.confirmation_requested` (kod trafia e-mailem). `kind` ustala serwer: `INTERNAL`, gdy IBAN odbiorcy
+        należy do tego banku, inaczej `EXTERNAL_OUT`. Reguły: `docs/business-rules.md` §3–4.
+        Powtórzenie z tym samym `Idempotency-Key` zwraca `200` z oryginalną płatnością.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePaymentRequest"
+      responses:
+        "201":
+          description: Płatność utworzona, oczekuje na kod potwierdzenia
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+        "200":
+          description: Powtórzone żądanie (ten sam `Idempotency-Key`) — oryginalna płatność
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422":
+          description: |
+            Reguła biznesowa odrzuciła przelew. `type` jeden z: `insufficient-funds`, `limit-exceeded`,
+            `invalid-iban`, `business-day-closed`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+
+  /me/payments/{paymentId}:
+    parameters:
+      - $ref: "#/components/parameters/PaymentId"
+    get:
+      tags: [customer]
+      operationId: getMyPayment
+      summary: Status i szczegóły płatności
+      description: UI odpytuje ten endpoint, dopóki `status` nie jest terminalny (`SETTLED`, `REJECTED`, `RETURNED`).
+      responses:
+        "200":
+          description: Płatność
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /me/payments/{paymentId}/confirm:
+    parameters:
+      - $ref: "#/components/parameters/PaymentId"
+    post:
+      tags: [customer]
+      operationId: confirmMyPayment
+      summary: Potwierdzenie przelewu kodem z e-maila
+      description: |
+        Poprawny kod: płatność jest księgowana (`POSTED`; wewnętrzna od razu `SETTLED`). Błędny kod: `422`
+        `confirmation-failed` ze zaktualizowanym `attemptsLeft` w `Problem.extensions`; po wyczerpaniu prób
+        lub po upływie `expiresAt` płatność przechodzi w `REJECTED` (`422` `confirmation-expired`).
+        Płatność w stanie innym niż `PENDING_CONFIRMATION` → `409` `conflict`.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmPaymentRequest"
+      responses:
+        "200":
+          description: Płatność po potwierdzeniu
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422":
+          description: "`confirmation-failed`, `confirmation-expired`, `insufficient-funds`, `business-day-closed`"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+
+  /me/standing-orders:
+    get:
+      tags: [customer]
+      operationId: listMyStandingOrders
+      summary: Zlecenia stałe klienta
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/StandingOrderStatus"
+      responses:
+        "200":
+          description: Strona zleceń
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandingOrderPage"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [customer]
+      operationId: createMyStandingOrder
+      summary: Utworzenie zlecenia stałego
+      description: |
+        Zlecenie jest potwierdzone przy utworzeniu (bez kodu). `nextRunDate` wylicza serwer z `frequency`,
+        `dayOfPeriod` i `startDate` (`docs/business-rules.md` §5). Powtórzenie z tym samym `Idempotency-Key`
+        zwraca `200` z oryginalnym zleceniem.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StandingOrderRequest"
+      responses:
+        "201":
+          description: Zlecenie utworzone
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandingOrder"
+        "200":
+          description: Powtórzone żądanie — oryginalne zlecenie
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandingOrder"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422":
+          description: "`invalid-iban`, `limit-exceeded`"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+
+  /me/standing-orders/{standingOrderId}:
+    parameters:
+      - $ref: "#/components/parameters/StandingOrderId"
+    get:
+      tags: [customer]
+      operationId: getMyStandingOrder
+      summary: Szczegóły zlecenia stałego
+      responses:
+        "200":
+          description: Zlecenie
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandingOrder"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [customer]
+      operationId: updateMyStandingOrder
+      summary: Zmiana zlecenia stałego
+      description: |
+        Pełna wymiana danych zlecenia (`ACTIVE`). Serwer przelicza `nextRunDate`. Zlecenie `CANCELLED` → `409`.
+        Współbieżna modyfikacja (niezgodna `version`) → `409` `conflict`.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateStandingOrderRequest"
+      responses:
+        "200":
+          description: Zaktualizowane zlecenie
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandingOrder"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422":
+          description: "`invalid-iban`, `limit-exceeded`"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+    delete:
+      tags: [customer]
+      operationId: cancelMyStandingOrder
+      summary: Anulowanie zlecenia stałego
+      description: Zlecenie przechodzi w `CANCELLED` (rekord zostaje). Powtórzenie jest idempotentne (`204`).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: Anulowane
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token z Keycloak (realm `bank`). Role w `realm_access.roles`.
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: UUID unikalny per klient przez 24 h. Powtórzenie zwraca oryginalny wynik; ten sam klucz z innym ciałem → `409` `duplicate-request`.
+      schema:
+        type: string
+        format: uuid
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Nieprzezroczysty kursor z `nextCursor` poprzedniej strony. Brak = pierwsza strona.
+      schema:
+        type: string
+        maxLength: 512
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Rozmiar strony (domyślnie 20, maks. 100).
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    AccountId:
+      name: accountId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    PaymentId:
+      name: paymentId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    StandingOrderId:
+      name: standingOrderId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    Validation:
+      description: Błąd walidacji żądania (`type` = `validation`, pole `errors`)
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Unauthorized:
+      description: Brak lub nieważny token
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Forbidden:
+      description: Brak roli (`type` = `forbidden`)
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    NotFound:
+      description: Zasób nie istnieje albo nie należy do klienta (`type` = `not-found`)
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Conflict:
+      description: "`conflict` (wersja / stan) albo `duplicate-request` (ten sam `Idempotency-Key`, inne ciało)"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+
+  schemas:
+    Money:
+      type: object
+      description: Kwota w jednostkach mniejszych (grosze) + kod ISO 4217. Nigdy liczby zmiennoprzecinkowe.
+      required: [minor, currency]
+      properties:
+        minor:
+          type: integer
+          format: int64
+          description: Kwota w groszach; znak zależy od kontekstu pola (opisany przy polu).
+          examples: [12345]
+        currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+          description: Kod ISO 4217
+          examples: [PLN]
+
+    Problem:
+      type: object
+      description: RFC 7807. `type` to `https://bank.local/problems/<slug>`; slugi w `docs/integration-contracts.md` §3.
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+          examples: ["https://bank.local/problems/insufficient-funds"]
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+          description: Ścieżka żądania
+        correlationId:
+          type: string
+          format: uuid
+          description: Id korelacji żądania — UI pokazuje go przy nieznanych błędach
+        errors:
+          type: array
+          description: Tylko dla `validation`
+          items:
+            $ref: "#/components/schemas/FieldError"
+        extensions:
+          type: object
+          description: Dodatkowe pola specyficzne dla slugu (np. `attemptsLeft` dla `confirmation-failed`, `available` dla `insufficient-funds`)
+          additionalProperties: true
+
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+          description: Ścieżka pola w ciele żądania (np. `amount.minor`)
+        message:
+          type: string
+
+    Customer:
+      type: object
+      required: [id, email, fullName, status]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        fullName: { type: string }
+        status:
+          $ref: "#/components/schemas/CustomerStatus"
+        createdAt: { type: string, format: date-time }
+
+    CustomerStatus:
+      type: string
+      enum: [ACTIVE, BLOCKED, CLOSED]
+
+    ProductKind:
+      type: string
+      enum: [CURRENT, SAVINGS]
+
+    AccountStatus:
+      type: string
+      description: "`ACTIVE ⇄ BLOCKED` (operator), `ACTIVE → CLOSED`. Na `BLOCKED` dozwolone tylko uznania."
+      enum: [ACTIVE, BLOCKED, CLOSED]
+
+    Account:
+      type: object
+      required: [id, iban, productCode, productName, productKind, currency, status, balance, availableBalance, openedOn, version]
+      properties:
+        id: { type: string, format: uuid }
+        iban:
+          type: string
+          description: 28 znaków, `PL` + 26-cyfrowy NRB
+          examples: [PL61100000000000000000000001]
+        productCode: { type: string, examples: [CURRENT_STD] }
+        productName: { type: string, examples: ["Konto osobiste"] }
+        productKind:
+          $ref: "#/components/schemas/ProductKind"
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        status:
+          $ref: "#/components/schemas/AccountStatus"
+        balance:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+          description: Saldo księgowe z perspektywy klienta (dodatnie = środki klienta)
+        availableBalance:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+          description: "`balance − aktywne blokady (+ limit debetu, jeśli produkt pozwala)`"
+        holdsTotal:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+          description: Suma aktywnych blokad (≥ 0)
+        openedOn: { type: string, format: date }
+        closedOn: { type: string, format: date }
+        version:
+          type: integer
+          format: int64
+          description: Wersja agregatu (optymistyczne blokowanie)
+
+    AccountPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Account"
+        nextCursor:
+          type: [string, "null"]
+
+    TransactionType:
+      type: string
+      description: Typ zapisu księgowego, z którego pochodzi pozycja
+      enum: [TRANSFER, TRANSFER_OUT, TRANSFER_IN, REVERSAL, CAPITALIZATION, MANUAL, FEE]
+
+    Transaction:
+      type: object
+      description: Pozycja historii rachunku wyprowadzona z jednego postingu na subkoncie GL rachunku.
+      required: [id, entryId, entryReference, type, bookingDate, valueDate, amount, balanceAfter]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Id postingu
+        entryId:
+          type: string
+          format: uuid
+          description: Id zapisu księgowego
+        entryReference:
+          type: string
+          description: Referencja dla ludzi (`JE-<sekwencja>`)
+          examples: [JE-1042]
+        type:
+          $ref: "#/components/schemas/TransactionType"
+        bookingDate: { type: string, format: date }
+        valueDate: { type: string, format: date }
+        amount:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+          description: Ze znakiem z perspektywy klienta — dodatni = uznanie, ujemny = obciążenie
+        balanceAfter:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+          description: Saldo księgowe rachunku po tej pozycji
+        counterpartyIban:
+          type: string
+          description: IBAN drugiej strony (jeśli dotyczy)
+        counterpartyName:
+          type: string
+        title:
+          type: string
+        paymentId:
+          type: string
+          format: uuid
+          description: Płatność, z której wynika pozycja (jeśli dotyczy)
+        reversalOfEntryId:
+          type: string
+          format: uuid
+          description: Dla `REVERSAL` — stornowany zapis
+
+    TransactionPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Transaction"
+        nextCursor:
+          type: [string, "null"]
+
+    PaymentKind:
+      type: string
+      enum: [INTERNAL, EXTERNAL_OUT, EXTERNAL_IN]
+
+    PaymentStatus:
+      type: string
+      description: |
+        `CREATED → PENDING_CONFIRMATION → POSTED → SETTLED`; `→ REJECTED` (walidacja, wygasły kod);
+        `POSTED → RETURNED` (zwrot z izby lub operatora). Terminalne: `SETTLED`, `REJECTED`, `RETURNED`.
+      enum: [CREATED, PENDING_CONFIRMATION, POSTED, SETTLED, REJECTED, RETURNED]
+
+    Payment:
+      type: object
+      required: [id, reference, kind, status, debtorIban, creditorIban, creditorName, amount, title, requestedDate, createdAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        reference:
+          type: string
+          description: "`PAY-<yyyymmdd>-<6 base32>`"
+          examples: [PAY-20260908-7K3M2Q]
+        kind:
+          $ref: "#/components/schemas/PaymentKind"
+        status:
+          $ref: "#/components/schemas/PaymentStatus"
+        debtorAccountId:
+          type: string
+          format: uuid
+          description: Rachunek klienta obciążany (brak dla `EXTERNAL_IN`)
+        creditorAccountId:
+          type: string
+          format: uuid
+          description: Rachunek klienta uznawany (dla `INTERNAL` i `EXTERNAL_IN`, jeśli należy do tego klienta)
+        debtorIban: { type: string }
+        debtorName: { type: string }
+        creditorIban: { type: string }
+        creditorName: { type: string }
+        amount:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+          description: Zawsze dodatnia
+        title: { type: string }
+        requestedDate:
+          type: string
+          format: date
+          description: Data biznesowa zlecenia
+        reasonCode:
+          type: string
+          description: Dla `REJECTED`/`RETURNED` — kod ISO 20022 (`AC01`, `AC04`, `AM04`, `MS03`) lub slug odrzucenia
+        clearingRef:
+          type: string
+          description: Referencja izby dla płatności zewnętrznych po rozliczeniu
+        confirmation:
+          $ref: "#/components/schemas/PaymentConfirmationInfo"
+        createdAt: { type: string, format: date-time }
+        postedAt: { type: string, format: date-time }
+        settledAt: { type: string, format: date-time }
+        version:
+          type: integer
+          format: int64
+
+    PaymentConfirmationInfo:
+      type: object
+      description: Obecne tylko w stanie `PENDING_CONFIRMATION`
+      required: [expiresAt, attemptsLeft]
+      properties:
+        expiresAt: { type: string, format: date-time }
+        attemptsLeft:
+          type: integer
+          minimum: 0
+
+    PaymentPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Payment"
+        nextCursor:
+          type: [string, "null"]
+
+    CreatePaymentRequest:
+      type: object
+      required: [debtorAccountId, creditorIban, creditorName, amount, title]
+      properties:
+        debtorAccountId:
+          type: string
+          format: uuid
+          description: Własny rachunek klienta
+        creditorIban:
+          type: string
+          minLength: 15
+          maxLength: 34
+          description: IBAN odbiorcy (bez spacji). Walidacja mod 97 po stronie serwera (`invalid-iban`).
+        creditorName:
+          type: string
+          minLength: 1
+          maxLength: 140
+        amount:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+          description: Dodatnia; min 1 grosz, maks. 100 000,00 PLN (`limit-exceeded`)
+        title:
+          type: string
+          minLength: 1
+          maxLength: 140
+
+    ConfirmPaymentRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          pattern: "^[0-9]{6}$"
+          description: 6-cyfrowy kod z e-maila
+
+    StandingOrderFrequency:
+      type: string
+      enum: [WEEKLY, MONTHLY]
+
+    StandingOrderStatus:
+      type: string
+      enum: [ACTIVE, CANCELLED]
+
+    StandingOrder:
+      type: object
+      required: [id, debtorAccountId, creditorIban, creditorName, amount, title, frequency, dayOfPeriod, nextRunDate, status, createdAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        debtorAccountId: { type: string, format: uuid }
+        creditorIban: { type: string }
+        creditorName: { type: string }
+        amount:
+          $ref: "#/components/schemas/Money"
+        title: { type: string }
+        frequency:
+          $ref: "#/components/schemas/StandingOrderFrequency"
+        dayOfPeriod:
+          type: integer
+          description: "`WEEKLY`: 1–7 (pon–ndz); `MONTHLY`: 1–28"
+          minimum: 1
+          maximum: 28
+        nextRunDate:
+          type: string
+          format: date
+          description: Następna data wykonania (już przesunięta na dzień roboczy, jeśli trzeba)
+        lastRunDate:
+          type: string
+          format: date
+        status:
+          $ref: "#/components/schemas/StandingOrderStatus"
+        createdAt: { type: string, format: date-time }
+        version:
+          type: integer
+          format: int64
+
+    StandingOrderPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/StandingOrder"
+        nextCursor:
+          type: [string, "null"]
+
+    StandingOrderRequest:
+      type: object
+      required: [debtorAccountId, creditorIban, creditorName, amount, title, frequency, dayOfPeriod]
+      properties:
+        debtorAccountId: { type: string, format: uuid }
+        creditorIban:
+          type: string
+          minLength: 15
+          maxLength: 34
+        creditorName:
+          type: string
+          minLength: 1
+          maxLength: 140
+        amount:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+          description: Dodatnia; te same limity co pojedyncza płatność
+        title:
+          type: string
+          minLength: 1
+          maxLength: 140
+        frequency:
+          $ref: "#/components/schemas/StandingOrderFrequency"
+        dayOfPeriod:
+          type: integer
+          minimum: 1
+          maximum: 28
+        startDate:
+          type: string
+          format: date
+          description: Najwcześniejsza data pierwszego wykonania; brak = pierwszy pasujący dzień po dzisiejszej dacie biznesowej
+
+    UpdateStandingOrderRequest:
+      allOf:
+        - $ref: "#/components/schemas/StandingOrderRequest"
+        - type: object
+          required: [version]
+          properties:
+            version:
+              type: integer
+              format: int64
+              description: Wersja z ostatnio odczytanego zlecenia; niezgodna → `409` `conflict`
