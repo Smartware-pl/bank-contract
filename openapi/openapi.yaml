@@ -1,14 +1,15 @@
 openapi: 3.1.0
 info:
   title: bank core-api
-  version: 0.1.0
+  version: 0.2.0
   description: |
     Kontrakt REST `core-api` (`/api/v1`). Normatywny dla wszystkich aplikacji webowych; klienty generują się
     z tego pliku w czasie builda (`docs/architecture.md` §1a). Zmiany są wyłącznie addytywne
     (`docs/integration-contracts.md` §3).
 
-    Tagi: `customer` (rola CUSTOMER, używa `customer-web`), `operator`/`admin` (`backoffice-web`).
-    W tej wersji opisane są endpointy `customer`; `operator`/`admin` dochodzą w kolejnych PR-ach.
+    Tagi: `customer` (rola CUSTOMER, używa `customer-web`), `operator` (OPERATOR i ADMIN; zapisy księgowe
+    i stopy tylko ADMIN — patrz `x-roles` operacji) oraz `admin` (tylko ADMIN). `backoffice-web` używa `operator`/`admin`.
+    Historia: v0.1 (2026-09-10) endpointy `customer`; v0.2 (2026-09-10) endpointy `operator`/`admin`.
 
     Konwencje:
     - kwoty `Money = {minor, currency}`; nigdy liczby zmiennoprzecinkowe;
@@ -23,9 +24,11 @@ tags:
   - name: customer
     description: Endpointy klienta (`/me/*`), rola `CUSTOMER`. Klient widzi wyłącznie własne zasoby.
   - name: operator
-    description: Konsola operatora (`OPERATOR`, `ADMIN`). Opisane w kolejnych wersjach kontraktu.
+    description: |
+      Konsola operatora (`backoffice-web`). Odczyty: `OPERATOR` i `ADMIN`. Zapisy oznaczone `x-roles: [ADMIN]`
+      (ręczne księgowania, storna, stopy) wymagają `ADMIN`. Operator widzi wszystkich klientów; własność nie ogranicza.
   - name: admin
-    description: Administracja (`ADMIN`). Opisane w kolejnych wersjach kontraktu.
+    description: "Administracja (`ADMIN`): kalendarz i EOD, przebiegi zadań."
 security:
   - bearerAuth: []
 
@@ -34,6 +37,7 @@ paths:
     get:
       tags: [customer]
       operationId: getMe
+      x-roles: [CUSTOMER]
       summary: Profil zalogowanego klienta
       description: Klient jest identyfikowany przez claim `sub` tokenu (mapowany na `customer.keycloak_sub`).
       responses:
@@ -51,6 +55,7 @@ paths:
     get:
       tags: [customer]
       operationId: listMyAccounts
+      x-roles: [CUSTOMER]
       summary: Rachunki zalogowanego klienta
       parameters:
         - $ref: "#/components/parameters/Cursor"
@@ -71,6 +76,7 @@ paths:
     get:
       tags: [customer]
       operationId: getMyAccount
+      x-roles: [CUSTOMER]
       summary: Szczegóły własnego rachunku
       description: Rachunek innego klienta zwraca `404` (`not-found`), nie `403`, żeby nie ujawniać istnienia zasobu.
       responses:
@@ -90,6 +96,7 @@ paths:
     get:
       tags: [customer]
       operationId: listMyAccountTransactions
+      x-roles: [CUSTOMER]
       summary: Historia rachunku
       description: |
         Pozycje wyprowadzone z postingów na subkoncie GL rachunku, od najnowszej. `amount.minor` jest ze znakiem
@@ -124,6 +131,7 @@ paths:
     get:
       tags: [customer]
       operationId: listMyPayments
+      x-roles: [CUSTOMER]
       summary: Płatności zalogowanego klienta
       description: Od najnowszej. Obejmuje płatności wychodzące z rachunków klienta oraz przychodzące na nie.
       parameters:
@@ -153,6 +161,7 @@ paths:
     post:
       tags: [customer]
       operationId: createMyPayment
+      x-roles: [CUSTOMER]
       summary: Utworzenie przelewu
       description: |
         Tworzy płatność w stanie `PENDING_CONFIRMATION`, zakłada blokadę na kwotę i publikuje
@@ -200,6 +209,7 @@ paths:
     get:
       tags: [customer]
       operationId: getMyPayment
+      x-roles: [CUSTOMER]
       summary: Status i szczegóły płatności
       description: UI odpytuje ten endpoint, dopóki `status` nie jest terminalny (`SETTLED`, `REJECTED`, `RETURNED`).
       responses:
@@ -219,6 +229,7 @@ paths:
     post:
       tags: [customer]
       operationId: confirmMyPayment
+      x-roles: [CUSTOMER]
       summary: Potwierdzenie przelewu kodem z e-maila
       description: |
         Poprawny kod: płatność jest księgowana (`POSTED`; wewnętrzna od razu `SETTLED`). Błędny kod: `422`
@@ -256,6 +267,7 @@ paths:
     get:
       tags: [customer]
       operationId: listMyStandingOrders
+      x-roles: [CUSTOMER]
       summary: Zlecenia stałe klienta
       parameters:
         - $ref: "#/components/parameters/Cursor"
@@ -277,6 +289,7 @@ paths:
     post:
       tags: [customer]
       operationId: createMyStandingOrder
+      x-roles: [CUSTOMER]
       summary: Utworzenie zlecenia stałego
       description: |
         Zlecenie jest potwierdzone przy utworzeniu (bez kodu). `nextRunDate` wylicza serwer z `frequency`,
@@ -321,6 +334,7 @@ paths:
     get:
       tags: [customer]
       operationId: getMyStandingOrder
+      x-roles: [CUSTOMER]
       summary: Szczegóły zlecenia stałego
       responses:
         "200":
@@ -335,6 +349,7 @@ paths:
     put:
       tags: [customer]
       operationId: updateMyStandingOrder
+      x-roles: [CUSTOMER]
       summary: Zmiana zlecenia stałego
       description: |
         Pełna wymiana danych zlecenia (`ACTIVE`). Serwer przelicza `nextRunDate`. Zlecenie `CANCELLED` → `409`.
@@ -368,6 +383,7 @@ paths:
     delete:
       tags: [customer]
       operationId: cancelMyStandingOrder
+      x-roles: [CUSTOMER]
       summary: Anulowanie zlecenia stałego
       description: Zlecenie przechodzi w `CANCELLED` (rekord zostaje). Powtórzenie jest idempotentne (`204`).
       parameters:
@@ -375,6 +391,1037 @@ paths:
       responses:
         "204":
           description: Anulowane
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ───────────────────────────── operator: dane referencyjne ─────────────────────────────
+
+  /products:
+    get:
+      tags: [operator]
+      operationId: listProducts
+      x-roles: [OPERATOR, ADMIN]
+      summary: Produkty rachunków
+      description: Dane referencyjne (`docs/domain-model.md` §3 `product`), porządek `code` rosnąco. Używane przy otwieraniu rachunku i przy stopach.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Strona produktów
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductPage"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  # ───────────────────────────── operator: klienci ─────────────────────────────
+
+  /customers:
+    get:
+      tags: [operator]
+      operationId: listCustomers
+      x-roles: [OPERATOR, ADMIN]
+      summary: Lista i wyszukiwanie klientów
+      description: Porządek `createdAt` malejąco.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: q
+          in: query
+          required: false
+          schema: { type: string, maxLength: 140 }
+          description: Fragment nazwiska lub e-maila (bez rozróżniania wielkości liter)
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/CustomerStatus"
+      responses:
+        "200":
+          description: Strona klientów, od najnowszego
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerPage"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [operator]
+      operationId: createCustomer
+      x-roles: [OPERATOR, ADMIN]
+      summary: Utworzenie klienta
+      description: |
+        Rekord klienta powiązany z istniejącym użytkownikiem Keycloak (`keycloakSub`, jeden użytkownik ↔ jeden klient).
+        Użytkownika zakłada się najpierw w Keycloak (Admin Console → realm `bank` → Users, rola `CUSTOMER`); `keycloakSub`
+        to pole *ID* użytkownika (równe claimowi `sub` tokenu). `email` powinien zgadzać się z Keycloak (core-api tego nie
+        weryfikuje — nie woła Keycloak po HTTP). Publikuje `customer.created`. Duplikat `keycloakSub` → `409` `conflict`.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCustomerRequest"
+      responses:
+        "201":
+          description: Klient utworzony
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorCustomer"
+        "200":
+          description: Powtórzone żądanie — oryginalny klient
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorCustomer"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /customers/{customerId}:
+    parameters:
+      - $ref: "#/components/parameters/CustomerId"
+    get:
+      tags: [operator]
+      operationId: getCustomer
+      x-roles: [OPERATOR, ADMIN]
+      summary: Szczegóły klienta
+      responses:
+        "200":
+          description: Klient
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorCustomer"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [operator]
+      operationId: updateCustomer
+      x-roles: [OPERATOR, ADMIN]
+      summary: Zmiana danych lub statusu klienta
+      description: |
+        Pola pominięte pozostają bez zmian; `status` równy bieżącemu to no-op (`200`). Maszyna stanów
+        (`docs/domain-model.md` §4): `ACTIVE ⇄ BLOCKED`; `→ CLOSED` z `ACTIVE` lub `BLOCKED`, tylko gdy wszystkie rachunki
+        klienta są `CLOSED`; `CLOSED` jest terminalny — każda zmiana klienta `CLOSED` → `409` `conflict`.
+        `BLOCKED` blokuje wyłącznie komendy klienta (`POST /me/payments`, `POST`/`PUT` `/me/standing-orders` → `403`
+        `forbidden`); odczyty, rachunki, uznania przychodzące, EOD i istniejące zlecenia działają bez zmian, status
+        rachunków nie kaskaduje. Zmiana `status` wymaga `reason` (inaczej `400` `validation`). Niezgodna `version` → `409`.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCustomerRequest"
+      responses:
+        "200":
+          description: Zaktualizowany klient
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorCustomer"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /customers/{customerId}/accounts:
+    parameters:
+      - $ref: "#/components/parameters/CustomerId"
+    get:
+      tags: [operator]
+      operationId: listCustomerAccounts
+      x-roles: [OPERATOR, ADMIN]
+      summary: Rachunki klienta
+      description: Porządek `openedOn` malejąco.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Strona rachunków
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorAccountPage"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [operator]
+      operationId: openAccount
+      x-roles: [OPERATOR, ADMIN]
+      summary: Otwarcie rachunku
+      description: |
+        Generuje IBAN/NRB (`docs/business-rules.md` §2), tworzy subkonto GL `2000-<accountId>` z saldem 0,
+        publikuje `account.opened`. Klient musi być `ACTIVE` (inaczej `409` `conflict`). Nieznany `productCode` → `404`.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpenAccountRequest"
+      responses:
+        "201":
+          description: Rachunek otwarty
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorAccount"
+        "200":
+          description: Powtórzone żądanie — oryginalny rachunek
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorAccount"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  # ───────────────────────────── operator: rachunki ─────────────────────────────
+
+  /accounts:
+    get:
+      tags: [operator]
+      operationId: searchAccounts
+      x-roles: [OPERATOR, ADMIN]
+      summary: Wyszukiwanie rachunków
+      description: Porządek `openedOn` malejąco (z filtrami i bez). Co najmniej jeden filtr jest zalecany; bez filtrów zwraca wszystkie rachunki.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: iban
+          in: query
+          required: false
+          schema: { type: string, minLength: 4, maxLength: 34 }
+          description: Pełny IBAN albo jego końcówka (≥ 4 znaki)
+        - name: customerId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/AccountStatus"
+        - name: productCode
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: Strona rachunków
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorAccountPage"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /accounts/{accountId}:
+    parameters:
+      - $ref: "#/components/parameters/AccountId"
+    get:
+      tags: [operator]
+      operationId: getAccount
+      x-roles: [OPERATOR, ADMIN]
+      summary: Szczegóły rachunku
+      responses:
+        "200":
+          description: Rachunek
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorAccount"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [operator]
+      operationId: changeAccountStatus
+      x-roles: [OPERATOR, ADMIN]
+      summary: Zmiana statusu rachunku
+      description: |
+        `ACTIVE → BLOCKED`, `BLOCKED → ACTIVE`, `ACTIVE → CLOSED`. Inne przejścia i niezgodna `version` → `409` `conflict`.
+        `ACTIVE → CLOSED` wykonuje się w tej kolejności, w jednej transakcji (`docs/business-rules.md` §8):
+        (1) `version` zgodna i przejście dozwolone; (2) brak aktywnych blokad, inaczej `409` `conflict`;
+        (3) jeśli są naliczone, nieskapitalizowane odsetki (`accruedInterest > 0`) — zapis `CAPITALIZATION` (wymaga dnia
+        `OPEN`, inaczej `422` `business-day-closed`); (4) saldo po kapitalizacji musi być 0, inaczej `409` `conflict`
+        z `extensions.balance` — rachunek zostaje `ACTIVE`, kapitalizacja pozostaje zaksięgowana, operator przenosi
+        środki i powtarza. Dialog potwierdzenia w UI pokazuje `balance`, `holdsTotal` i `accruedInterest`.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountStatusChangeRequest"
+      responses:
+        "200":
+          description: Rachunek po zmianie
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorAccount"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422":
+          description: "`business-day-closed` (kapitalizacja przy zamknięciu wymaga dnia `OPEN`)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+
+  /accounts/{accountId}/transactions:
+    parameters:
+      - $ref: "#/components/parameters/AccountId"
+    get:
+      tags: [operator]
+      operationId: listAccountTransactions
+      x-roles: [OPERATOR, ADMIN]
+      summary: Historia rachunku (widok operatora)
+      description: Ten sam kształt co `/me/accounts/{id}/transactions`, bez ograniczenia własności.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Strona historii
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransactionPage"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /accounts/{accountId}/holds:
+    parameters:
+      - $ref: "#/components/parameters/AccountId"
+    get:
+      tags: [operator]
+      operationId: listAccountHolds
+      x-roles: [OPERATOR, ADMIN]
+      summary: Blokady na rachunku
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/HoldStatus"
+          description: Domyślnie wszystkie; `ACTIVE` = wpływające na saldo dostępne
+      responses:
+        "200":
+          description: Strona blokad, od najnowszej
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HoldPage"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [operator]
+      operationId: createHold
+      x-roles: [OPERATOR, ADMIN]
+      summary: Ręczna blokada środków
+      description: |
+        Blokada `referenceType = MANUAL` obniżająca saldo dostępne. Kwota większa niż saldo dostępne → `422`
+        `insufficient-funds`. Rachunek `CLOSED` → `409` `conflict`. Nie tworzy zapisu księgowego.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateHoldRequest"
+      responses:
+        "201":
+          description: Blokada założona
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Hold"
+        "200":
+          description: Powtórzone żądanie — oryginalna blokada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Hold"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422":
+          description: "`insufficient-funds`"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+
+  /accounts/{accountId}/holds/{holdId}:
+    parameters:
+      - $ref: "#/components/parameters/AccountId"
+      - $ref: "#/components/parameters/HoldId"
+    get:
+      tags: [operator]
+      operationId: getHold
+      x-roles: [OPERATOR, ADMIN]
+      summary: Szczegóły blokady
+      responses:
+        "200":
+          description: Blokada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Hold"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [operator]
+      operationId: releaseHold
+      x-roles: [OPERATOR, ADMIN]
+      summary: Zwolnienie ręcznej blokady
+      description: |
+        Tylko blokady `MANUAL`; blokady płatności (`PAYMENT`) zwalnia cykl życia płatności → `409` `conflict`.
+        Powtórzenie na zwolnionej blokadzie jest idempotentne (`204`).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: Zwolniona
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  # ───────────────────────────── operator: płatności ─────────────────────────────
+
+  /payments:
+    get:
+      tags: [operator]
+      operationId: listPayments
+      x-roles: [OPERATOR, ADMIN]
+      summary: Lista i wyszukiwanie płatności
+      description: Porządek `createdAt` malejąco.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/PaymentStatus"
+        - name: kind
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/PaymentKind"
+        - name: accountId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+          description: Rachunek nadawcy lub odbiorcy
+        - name: customerId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: reference
+          in: query
+          required: false
+          schema: { type: string, maxLength: 40 }
+          description: Referencja `PAY-…` albo `clearingRef`
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: Najwcześniejsza `requestedDate`
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: Najpóźniejsza `requestedDate`
+      responses:
+        "200":
+          description: Strona płatności, od najnowszej
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorPaymentPage"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /payments/{paymentId}:
+    parameters:
+      - $ref: "#/components/parameters/PaymentId"
+    get:
+      tags: [operator]
+      operationId: getPayment
+      x-roles: [OPERATOR, ADMIN]
+      summary: Szczegóły płatności (widok operatora)
+      responses:
+        "200":
+          description: Płatność z identyfikatorami księgowymi
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorPayment"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /payments/{paymentId}/return:
+    parameters:
+      - $ref: "#/components/parameters/PaymentId"
+    post:
+      tags: [operator]
+      operationId: returnPayment
+      x-roles: [OPERATOR, ADMIN]
+      summary: Ręczny zwrot płatności
+      description: |
+        Tylko dla płatności `POSTED` (w praktyce `EXTERNAL_OUT` czekająca na izbę; wewnętrzne są `SETTLED` natychmiast):
+        księguje `REVERSAL` odwracający zapis `entryId` (postingi oryginału z odwróconym znakiem, `bookingDate` =
+        `businessDate` = bieżący dzień `OPEN`), płatność → `RETURNED` z `reasonCode`, publikuje `payment.returned`.
+        To jedyne storno dostępne dla `OPERATOR` — utrzymuje maszynę stanów płatności spójną z księgą
+        (`docs/business-rules.md` §9). Inny status (w tym `SETTLED`) → `409` `conflict`; niezgodna `version` (jeśli
+        podana) → `409`; dzień roboczy nie `OPEN` → `422` `business-day-closed`. Oflagowane w audycie.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReturnPaymentRequest"
+      responses:
+        "200":
+          description: Płatność po zwrocie (`RETURNED`, `reversalEntryId` ustawione)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorPayment"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422":
+          description: "`business-day-closed`"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+
+  # ───────────────────────────── operator/admin: księga ─────────────────────────────
+
+  /ledger/gl-accounts:
+    get:
+      tags: [operator]
+      operationId: listGlAccounts
+      x-roles: [OPERATOR, ADMIN]
+      summary: Plan kont z saldami
+      description: |
+        Konta GL (`docs/domain-model.md` §2) z saldem na bieżącą datę biznesową, porządek `code` rosnąco. Saldo jest sumą
+        postingów ze znakiem: dodatnie = debetowe (Wn), ujemne = kredytowe (Ma). UI wyprowadza stronę ze znaku; API nie
+        zwraca flagi dr/cr. Konto nadrzędne (np. `2000`) ma saldo roll-up (własne postingi + wszystkich potomków).
+        Domyślnie bez subkont klientów `2000-*` (`includeCustomerSubaccounts=true`, żeby je dołączyć); `parentCode` ma
+        pierwszeństwo — `parentCode=2000` zwraca subkonta niezależnie od `includeCustomerSubaccounts`.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: type
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/GlAccountType"
+        - name: parentCode
+          in: query
+          required: false
+          schema: { type: string }
+          description: Tylko dzieci tego konta (np. `2000` → subkonta klientów)
+        - name: includeCustomerSubaccounts
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Strona kont GL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlAccountPage"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /ledger/gl-accounts/{code}:
+    parameters:
+      - $ref: "#/components/parameters/GlAccountCode"
+    get:
+      tags: [operator]
+      operationId: getGlAccount
+      x-roles: [OPERATOR, ADMIN]
+      summary: Konto GL z saldem
+      responses:
+        "200":
+          description: Konto GL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlAccount"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /ledger/entries:
+    get:
+      tags: [operator]
+      operationId: listJournalEntries
+      x-roles: [OPERATOR, ADMIN]
+      summary: Zapisy księgowe
+      description: Porządek `bookingDate` malejąco, potem sekwencja zapisu (liczbowo z `JE-<sekwencja>`) malejąco. Filtr `glAccountCode` zwraca zapisy z co najmniej jednym postingiem na tym koncie.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: glAccountCode
+          in: query
+          required: false
+          schema: { type: string }
+        - name: type
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/JournalEntryType"
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: Najwcześniejsza `bookingDate`
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: Najpóźniejsza `bookingDate`
+        - name: referenceType
+          in: query
+          required: false
+          schema: { type: string }
+        - name: referenceId
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: Strona zapisów (z postingami)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntryPage"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /ledger/entries/{entryId}:
+    parameters:
+      - $ref: "#/components/parameters/EntryId"
+    get:
+      tags: [operator]
+      operationId: getJournalEntry
+      x-roles: [OPERATOR, ADMIN]
+      summary: Zapis księgowy z postingami
+      responses:
+        "200":
+          description: Zapis
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntry"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /ledger/entries/{entryId}/reverse:
+    parameters:
+      - $ref: "#/components/parameters/EntryId"
+    post:
+      tags: [operator]
+      operationId: reverseJournalEntry
+      x-roles: [ADMIN]
+      summary: Storno zapisu
+      description: |
+        Nowy zapis `REVERSAL`: te same konta z odwróconym znakiem kwot, `reversalOfEntryId` = oryginał, `bookingDate` =
+        `valueDate` = `businessDate` = bieżący dzień (`docs/business-rules.md` §9); oryginał pozostaje nietknięty
+        (dostaje `reversedByEntryId`). Storno jest wyłącznie księgowe — nie zmienia płatności, blokad, `accrual_daily`
+        ani `capitalization_run`; dlatego zapis z `referenceType = PAYMENT` → `409` `conflict` (jedyna droga:
+        `POST /payments/{id}/return`). Zapis już wystornowany albo sam będący `REVERSAL` → `409` `conflict`.
+        Dozwolone w dniu `OPEN` oraz — wyjątkowo — w dniu `CLOSING`, którego `closingJobRunId` jest `FAILED` (korekta
+        uzgodnienia przed wznowieniem EOD; wtedy `businessDate` = dzień `CLOSING`); `CLOSING` z przebiegiem `RUNNING`
+        → `422` `business-day-closed`. UI pokazuje podgląd storna jako postingi oryginału z odwróconym znakiem. Oflagowane w audycie.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReverseEntryRequest"
+      responses:
+        "201":
+          description: Zapis storna
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntry"
+        "200":
+          description: Powtórzone żądanie — oryginalny zapis storna
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntry"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422":
+          description: "`business-day-closed`"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+
+  /ledger/entries:manual:
+    post:
+      tags: [operator]
+      operationId: postManualEntry
+      x-roles: [ADMIN]
+      summary: Ręczne księgowanie
+      description: |
+        Zapis `MANUAL` z ≥ 2 postingami sumującymi się do zera w jednej walucie (`422` `unbalanced-entry`).
+        `bookingDate` = `businessDate` = bieżący dzień (bez datowania wstecz); `valueDate` opcjonalnie, domyślnie = `bookingDate`.
+        Moduł `ledger` nie zna statusu rachunku ani salda dostępnego: zapis ręczny może obciążyć `2000-*` poniżej zera
+        i dotyczyć rachunku `BLOCKED`/`CLOSED` (reguły `docs/business-rules.md` §4 obowiązują tylko płatności) — dlatego
+        `reason` jest zawsze wymagane, a postingi na `2000-*` są oflagowane w audycie. Nieznane konto GL → `404`.
+        Dozwolone w dniu `OPEN` oraz w dniu `CLOSING`, którego `closingJobRunId` jest `FAILED` (korekta uzgodnienia;
+        `businessDate` = dzień `CLOSING`); `CLOSING` z przebiegiem `RUNNING` → `422` `business-day-closed`.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ManualEntryRequest"
+      responses:
+        "201":
+          description: Zaksięgowany zapis
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntry"
+        "200":
+          description: Powtórzone żądanie — oryginalny zapis
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntry"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422":
+          description: "`unbalanced-entry`, `business-day-closed`"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+
+  # ───────────────────────────── admin: stopy ─────────────────────────────
+
+  /interest/rate-schedules:
+    get:
+      tags: [operator]
+      operationId: listRateSchedules
+      x-roles: [OPERATOR, ADMIN]
+      summary: Harmonogramy stóp
+      description: |
+        Porządek `effectiveFrom` malejąco. Dla produktu obowiązuje (`status = IN_FORCE`) harmonogram o największym
+        `effectiveFrom ≤ businessDate`; wcześniejsze są `SUPERSEDED`, późniejsze `SCHEDULED`. Stopa nie jest przypinana
+        do rachunku (`docs/business-rules.md` §7).
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: productCode
+          in: query
+          required: false
+          schema: { type: string }
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/RateScheduleStatus"
+      responses:
+        "200":
+          description: Strona harmonogramów
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RateSchedulePage"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [operator]
+      operationId: createRateSchedule
+      x-roles: [ADMIN]
+      summary: Nowy harmonogram stóp
+      description: |
+        Harmonogramy są append-only: zmiana stopy to nowy harmonogram. `effectiveFrom` ≥ `nextBusinessDate` i większy niż
+        `effectiveFrom` najnowszego harmonogramu produktu — inaczej `400` `validation` z `errors[{field: effectiveFrom}]`.
+        Para (`productCode`, `effectiveFrom`) jest unikalna → `409` `conflict`. Progi rosnąco po `upToMinor`, ostatni próg
+        `upToMinor: null` (bez górnej granicy). Stopy w punktach bazowych. Nieznany `productCode` → `404`.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRateScheduleRequest"
+      responses:
+        "201":
+          description: Harmonogram utworzony
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RateSchedule"
+        "200":
+          description: Powtórzone żądanie — oryginalny harmonogram
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RateSchedule"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /interest/rate-schedules/{rateScheduleId}:
+    parameters:
+      - $ref: "#/components/parameters/RateScheduleId"
+    get:
+      tags: [operator]
+      operationId: getRateSchedule
+      x-roles: [OPERATOR, ADMIN]
+      summary: Harmonogram stóp
+      responses:
+        "200":
+          description: Harmonogram
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RateSchedule"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ───────────────────────────── admin: kalendarz i EOD ─────────────────────────────
+
+  /business-days:
+    get:
+      tags: [admin]
+      operationId: listBusinessDays
+      x-roles: [ADMIN]
+      summary: Kalendarz dni roboczych
+      description: "Dni z kalendarza (`docs/business-rules.md` §6) w zakresie dat, rosnąco. Bez zakresu: 30 dni wstecz od bieżącej daty biznesowej i 30 naprzód."
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/BusinessDayStatus"
+      responses:
+        "200":
+          description: Strona dni
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BusinessDayPage"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /business-days/current:
+    get:
+      tags: [admin]
+      operationId: getCurrentBusinessDay
+      x-roles: [ADMIN]
+      summary: Bieżący dzień biznesowy
+      description: |
+        Dokładnie jeden dzień jest `OPEN` albo `CLOSING` (w trakcie EOD). Dla dnia `CLOSING` `closingJobRunId` = najnowszy
+        przebieg orkiestratora tego dnia (`RUNNING` — EOD trwa; `FAILED` — dzień wymaga interwencji ADMIN: korekta księgowa
+        przez `/ledger/entries:manual` lub `/reverse`, potem ponowne `POST /business-days:close`, które wznawia łańcuch).
+        Dla dnia `OPEN` pole jest puste.
+      responses:
+        "200":
+          description: Bieżący dzień
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurrentBusinessDay"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /business-days:close:
+    post:
+      tags: [admin]
+      operationId: closeBusinessDay
+      x-roles: [ADMIN]
+      summary: Wyzwolenie zamknięcia dnia (EOD)
+      description: |
+        Uruchamia łańcuch EOD (`docs/business-rules.md` §6) i zwraca `202` z przebiegiem orkiestratora; UI odpytuje
+        `GET /jobs/{id}` do statusu terminalnego.
+        - Dzień `OPEN`: `OPEN → CLOSING`, nowy przebieg `jobName = eod` (`businessDate` = zamykany dzień). Jego `steps`
+          to osobne przebiegi z `parentRunId`: `eod.expire-confirmations`, `eod.standing-orders`, `eod.accrual`,
+          `eod.capitalization`, `eod.snapshots` (przejścia stanów dnia wykonuje orkiestrator bez osobnego przebiegu).
+        - Dzień `CLOSING` z przebiegiem `RUNNING` → `409` `conflict` (`extensions.jobRunId`).
+        - Dzień `CLOSING` z ostatnim przebiegiem `FAILED` → wznowienie: nowy przebieg `eod` z `resumesRunId` = nieudany,
+          kroki już `SUCCEEDED` dla tej daty są pomijane (są idempotentne), start od nieudanego kroku (`202`);
+          `closingJobRunId` dnia wskazuje nowy przebieg. Scheduler nigdy nie wznawia — tylko ADMIN.
+        - `times > 1` (przewijanie dev/test) tylko gdy `fastForwardAllowed` (`bank.allow-fast-forward=true`), inaczej
+          `403` `forbidden`. Odpowiedź to jeden przebieg nadrzędny `jobName = eod.fast-forward` (`businessDate` = pierwszy
+          zamykany dzień), którego `steps` to kolejne przebiegi `eod` (jeden na dzień, każdy z własnymi krokami); status
+          terminalny po ostatnim dniu, `FAILED` zatrzymuje przewijanie na dniu, który zawiódł.
+        Nigdy nie naprawia uzgodnienia automatycznie: niepowodzenie zostawia dzień w `CLOSING` i przebieg `FAILED`
+        z `reconciliation` opisującym, co się nie zgadza.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: times
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 400, default: 1 }
+          description: Liczba dni roboczych do zamknięcia po kolei (dev/test)
+      responses:
+        "202":
+          description: EOD uruchomiony
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobRun"
+        "200":
+          description: Powtórzone żądanie — ten sam przebieg
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobRun"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  # ───────────────────────────── admin: zadania batch ─────────────────────────────
+
+  /jobs:
+    get:
+      tags: [admin]
+      operationId: listJobRuns
+      x-roles: [ADMIN]
+      summary: Przebiegi zadań batch
+      description: Porządek `startedAt` malejąco. Lista zawiera orkiestratory i ich kroki (filtruj `parentRunId`); `steps` jest wypełniane tylko w `GET /jobs/{id}` i w odpowiedzi `202` na EOD.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: jobName
+          in: query
+          required: false
+          schema: { type: string }
+        - name: businessDate
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/JobRunStatus"
+        - name: parentRunId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+          description: Kroki jednego przebiegu EOD
+      responses:
+        "200":
+          description: Strona przebiegów, od najnowszego
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobRunPage"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /jobs/{jobRunId}:
+    parameters:
+      - $ref: "#/components/parameters/JobRunId"
+    get:
+      tags: [admin]
+      operationId: getJobRun
+      x-roles: [ADMIN]
+      summary: Przebieg zadania
+      description: Dla orkiestratora EOD `steps` zawiera kroki łańcucha w kolejności wykonania.
+      responses:
+        "200":
+          description: Przebieg
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobRun"
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -392,7 +1439,12 @@ components:
       name: Idempotency-Key
       in: header
       required: true
-      description: UUID unikalny per klient przez 24 h. Powtórzenie zwraca oryginalny wynik; ten sam klucz z innym ciałem → `409` `duplicate-request`.
+      description: |
+        UUID, unikalny per wywołującego (`sub`) przez 24 h. Odcisk żądania = metoda + ścieżka + SHA-256 znormalizowanego
+        ciała. Zapisywana jest wyłącznie odpowiedź 2xx (status + ciało); powtórzenie z tym samym kluczem i odciskiem
+        zwraca zapisane ciało (snapshot z chwili pierwszej odpowiedzi, nie bieżący stan) ze statusem `200` dla
+        oryginalnych `201`/`202` i `204` dla oryginalnego `204`. Ten sam klucz z innym odciskiem → `409` `duplicate-request`.
+        Odpowiedź 4xx/5xx nie konsumuje klucza — można powtórzyć. Kontrola idempotencji poprzedza kontrolę stanu.
       schema:
         type: string
         format: uuid
@@ -400,7 +1452,10 @@ components:
       name: cursor
       in: query
       required: false
-      description: Nieprzezroczysty kursor z `nextCursor` poprzedniej strony. Brak = pierwsza strona.
+      description: |
+        Nieprzezroczysty kursor z `nextCursor` poprzedniej strony (koduje klucze sortowania ostatniego elementu i filtry).
+        Brak = pierwsza strona. Kursor niepasujący do bieżących filtrów lub uszkodzony → `400` `validation`.
+        Porządek każdej listy jest podany w jej opisie; tie-break zawsze `id` malejąco (UUID v7 jest uporządkowany czasowo).
       schema:
         type: string
         maxLength: 512
@@ -429,6 +1484,41 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    CustomerId:
+      name: customerId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    HoldId:
+      name: holdId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    EntryId:
+      name: entryId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    GlAccountCode:
+      name: code
+      in: path
+      required: true
+      description: |
+        Kod konta GL w formie kanonicznej: `NNNN` albo `NNNN-<uuid małymi literami>` (subkonto klienta `2000-<accountId>`).
+        Ścieżka niepasująca do wzorca → `400` `validation`; pasująca, a nieistniejąca → `404`.
+      schema:
+        type: string
+        pattern: "^[0-9]{4}(-[0-9a-f-]{36})?$"
+    RateScheduleId:
+      name: rateScheduleId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    JobRunId:
+      name: jobRunId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
 
   responses:
     Validation:
@@ -444,7 +1534,7 @@ components:
           schema:
             $ref: "#/components/schemas/Problem"
     Forbidden:
-      description: Brak roli (`type` = `forbidden`)
+      description: "Brak roli albo operacja niedozwolona polityką/konfiguracją serwera (`type` = `forbidden`; szczegół w `detail`)"
       content:
         application/problem+json:
           schema:
@@ -508,7 +1598,21 @@ components:
             $ref: "#/components/schemas/FieldError"
         extensions:
           type: object
-          description: Dodatkowe pola specyficzne dla slugu (np. `attemptsLeft` dla `confirmation-failed`, `available` dla `insufficient-funds`)
+          description: |
+            Pola specyficzne dla slugu. Kwoty w `extensions` zawsze jako `Money` (`{minor,currency}`), nigdy gołe liczby.
+            Znane: `available` (`insufficient-funds`), `attemptsLeft` (`confirmation-failed`), `jobRunId` (`conflict` przy EOD),
+            `balance` (`conflict` przy zamykaniu rachunku z saldem ≠ 0).
+          properties:
+            available:
+              $ref: "#/components/schemas/Money"
+            balance:
+              $ref: "#/components/schemas/Money"
+            attemptsLeft:
+              type: integer
+              minimum: 0
+            jobRunId:
+              type: string
+              format: uuid
           additionalProperties: true
 
     FieldError:
@@ -861,3 +1965,673 @@ components:
               type: integer
               format: int64
               description: Wersja z ostatnio odczytanego zlecenia; niezgodna → `409` `conflict`
+
+    # ───────────────────────────── operator / admin ─────────────────────────────
+
+    Capitalization:
+      type: string
+      enum: [MONTHLY, QUARTERLY, NONE]
+
+    Product:
+      type: object
+      description: Definicja typu rachunku (`docs/domain-model.md` §3 `product`).
+      required: [code, name, kind, allowsDebit, allowsOverdraft, capitalization, currency]
+      properties:
+        code: { type: string, examples: [CURRENT_STD] }
+        name: { type: string, examples: ["Konto osobiste"] }
+        kind:
+          $ref: "#/components/schemas/ProductKind"
+        allowsDebit:
+          type: boolean
+          description: Czy z rachunku można zlecać obciążenia (przelewy)
+        allowsOverdraft:
+          type: boolean
+        overdraftLimit:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+          description: Limit debetu, gdy `allowsOverdraft` (≥ 0)
+        capitalization:
+          $ref: "#/components/schemas/Capitalization"
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        defaultRateScheduleId:
+          type: string
+          format: uuid
+          description: |
+            Harmonogram bazowy produktu (seed). Stopa NIE jest przypinana do rachunku: dla każdego dnia naliczenia
+            obowiązuje harmonogram produktu o największym `effectiveFrom ≤ businessDate` (`docs/business-rules.md` §7).
+
+    ProductPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Product"
+        nextCursor:
+          type: [string, "null"]
+
+    OperatorCustomer:
+      description: Klient w widoku operatora — `Customer` plus identyfikator Keycloak i wersja.
+      allOf:
+        - $ref: "#/components/schemas/Customer"
+        - type: object
+          required: [keycloakSub, version, accountsCount]
+          properties:
+            keycloakSub:
+              type: string
+              description: Claim `sub` użytkownika w realmie `bank` (1:1)
+            accountsCount:
+              type: integer
+              minimum: 0
+              description: Liczba rachunków niezamkniętych
+            version:
+              type: integer
+              format: int64
+            updatedAt: { type: string, format: date-time }
+
+    CustomerPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OperatorCustomer"
+        nextCursor:
+          type: [string, "null"]
+
+    CreateCustomerRequest:
+      type: object
+      required: [keycloakSub, email, fullName]
+      properties:
+        keycloakSub:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: "`sub` istniejącego użytkownika Keycloak — pole *ID* użytkownika w Admin Console (realm `bank` → Users)"
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        fullName:
+          type: string
+          minLength: 1
+          maxLength: 140
+
+    UpdateCustomerRequest:
+      type: object
+      description: Pola pominięte pozostają bez zmian. `version` obowiązkowa.
+      required: [version]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        fullName:
+          type: string
+          minLength: 1
+          maxLength: 140
+        status:
+          $ref: "#/components/schemas/CustomerStatus"
+        reason:
+          type: string
+          maxLength: 280
+          description: Wymagany przy zmianie `status` (`400` `validation` bez niego); trafia do audytu
+        version:
+          type: integer
+          format: int64
+
+    OperatorAccount:
+      description: Rachunek w widoku operatora — `Account` plus właściciel i konto GL.
+      allOf:
+        - $ref: "#/components/schemas/Account"
+        - type: object
+          required: [customerId, glAccountCode]
+          properties:
+            customerId: { type: string, format: uuid }
+            glAccountCode:
+              type: string
+              description: Subkonto GL rachunku (`2000-<accountId>`)
+            overdraftLimit:
+              allOf:
+                - $ref: "#/components/schemas/Money"
+              description: Limit debetu produktu, jeśli dotyczy
+            accruedInterest:
+              allOf:
+                - $ref: "#/components/schemas/Money"
+              description: Naliczone, nieskapitalizowane odsetki (Σ `accrual_daily` od ostatniej kapitalizacji, ≥ 0) — kwota, którą zaksięguje kapitalizacja przy zamknięciu
+
+    OperatorAccountPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OperatorAccount"
+        nextCursor:
+          type: [string, "null"]
+
+    OpenAccountRequest:
+      type: object
+      required: [productCode]
+      properties:
+        productCode:
+          type: string
+          minLength: 1
+
+    AccountStatusChangeRequest:
+      type: object
+      required: [status, reason, version]
+      properties:
+        status:
+          $ref: "#/components/schemas/AccountStatus"
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 280
+          description: Powód (audyt)
+        version:
+          type: integer
+          format: int64
+
+    HoldStatus:
+      type: string
+      enum: [ACTIVE, RELEASED]
+
+    HoldReferenceType:
+      type: string
+      description: "`PAYMENT` — blokada cyklu życia płatności; `MANUAL` — założona przez operatora"
+      enum: [PAYMENT, MANUAL]
+
+    Hold:
+      type: object
+      required: [id, accountId, amount, reason, referenceType, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        amount:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+          description: Zawsze dodatnia
+        reason: { type: string }
+        referenceType:
+          $ref: "#/components/schemas/HoldReferenceType"
+        referenceId:
+          type: string
+          format: uuid
+          description: Id płatności dla `PAYMENT`
+        status:
+          $ref: "#/components/schemas/HoldStatus"
+        createdBy:
+          type: string
+          description: "`sub` operatora dla `MANUAL`"
+        createdAt: { type: string, format: date-time }
+        releasedAt: { type: string, format: date-time }
+
+    HoldPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Hold"
+        nextCursor:
+          type: [string, "null"]
+
+    CreateHoldRequest:
+      type: object
+      required: [amount, reason]
+      properties:
+        amount:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+          description: Dodatnia, w walucie rachunku
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 280
+
+    OperatorPayment:
+      description: Płatność w widoku operatora — `Payment` plus identyfikatory księgowe i właścicieli.
+      allOf:
+        - $ref: "#/components/schemas/Payment"
+        - type: object
+          properties:
+            debtorCustomerId: { type: string, format: uuid }
+            creditorCustomerId: { type: string, format: uuid }
+            holdId:
+              type: string
+              format: uuid
+              description: Blokada środków (od `PENDING_CONFIRMATION` do `POSTED`/`REJECTED`)
+            entryId:
+              type: string
+              format: uuid
+              description: Zapis księgowy księgowania (`POSTED`)
+            reversalEntryId:
+              type: string
+              format: uuid
+              description: Zapis storna (`RETURNED`)
+            returnedBy:
+              type: string
+              description: "`sub` operatora przy ręcznym zwrocie; brak = zwrot z izby"
+            updatedAt: { type: string, format: date-time }
+
+    OperatorPaymentPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OperatorPayment"
+        nextCursor:
+          type: [string, "null"]
+
+    ReturnReasonCode:
+      type: string
+      description: Podzbiór ISO 20022 (`docs/integration-contracts.md` §4). `AM04` nie jest emitowany przez bank.
+      enum: [AC01, AC04, MS03]
+
+    ReturnPaymentRequest:
+      type: object
+      required: [reasonCode, reason]
+      properties:
+        reasonCode:
+          $ref: "#/components/schemas/ReturnReasonCode"
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 280
+          description: Uzasadnienie operatora (audyt)
+        version:
+          type: integer
+          format: int64
+          description: Wersja z ostatnio odczytanej płatności (`OperatorPayment.version`); jeśli podana i niezgodna → `409` `conflict`
+
+    GlAccountType:
+      type: string
+      description: Typ konta z planu kont (`docs/domain-model.md` §2). `TECHNICAL` = konto techniczne `9000`.
+      enum: [ASSET, LIABILITY, INCOME, EXPENSE, TECHNICAL]
+
+    GlAccount:
+      type: object
+      required: [code, name, type, balance, balanceDate]
+      properties:
+        code:
+          type: string
+          examples: ["2100", "2000-0191f7a0-1111-7000-8000-000000000001"]
+        name: { type: string }
+        type:
+          $ref: "#/components/schemas/GlAccountType"
+        parentCode:
+          type: string
+          description: Konto nadrzędne (np. `2000` dla subkont klientów)
+        customerAccountId:
+          type: string
+          format: uuid
+          description: Dla subkont `2000-*` — rachunek klienta
+        balance:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+          description: |
+            Σ postingów z `businessDate ≤ balanceDate` na tym koncie i na wszystkich jego potomkach (roll-up po `parentCode`),
+            ze znakiem — dodatnie = Wn, ujemne = Ma. Konta-liście (np. `2000-<accountId>`, `2100`) mają tylko postingi własne;
+            konto kontrolne `2000` = Σ subkont klientów (uzgodnienie `docs/business-rules.md` §6).
+        balanceDate:
+          type: string
+          format: date
+          description: Data biznesowa, na którą liczone jest saldo (bieżący dzień)
+        postingsCount:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Liczba postingów do `balanceDate` włącznie (dla konta nadrzędnego — roll-up po potomkach)
+
+    GlAccountPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/GlAccount"
+        nextCursor:
+          type: [string, "null"]
+
+    JournalEntryType:
+      type: string
+      description: Typy zapisów (`docs/business-rules.md` §4, §7–9). `TransactionType` historii klienta jest podzbiorem.
+      enum: [TRANSFER, TRANSFER_OUT, TRANSFER_IN, REVERSAL, INTEREST_ACCRUAL, OVERDRAFT_ACCRUAL, CAPITALIZATION, MANUAL, FEE]
+
+    Posting:
+      type: object
+      required: [id, glAccountCode, amount]
+      properties:
+        id: { type: string, format: uuid }
+        glAccountCode: { type: string }
+        amount:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+          description: Ze znakiem — dodatnia = debet (Wn), ujemna = kredyt (Ma). Jedna kolumna, bez flagi dr/cr.
+
+    JournalEntry:
+      type: object
+      description: Zapis księgowy z postingami sumującymi się do zera. Append-only; korekta = `REVERSAL`.
+      required: [id, reference, type, bookingDate, valueDate, businessDate, postings, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        reference:
+          type: string
+          description: "`JE-<sekwencja>`"
+          examples: [JE-1042]
+        type:
+          $ref: "#/components/schemas/JournalEntryType"
+        bookingDate: { type: string, format: date }
+        valueDate: { type: string, format: date }
+        businessDate: { type: string, format: date }
+        description: { type: string }
+        referenceType:
+          type: string
+          description: Rodzaj obiektu źródłowego (`PAYMENT`, `ACCRUAL_DAILY`, `CAPITALIZATION_RUN`, `MANUAL`, …)
+        referenceId:
+          type: string
+          description: Id obiektu źródłowego
+        reversalOfEntryId:
+          type: string
+          format: uuid
+          description: Dla `REVERSAL` — stornowany zapis (nazwa jak `Transaction.reversalOfEntryId`)
+        reversedByEntryId:
+          type: string
+          format: uuid
+          description: Zapis storna, jeśli ten zapis został wystornowany (zapis ma co najwyżej jedno storno)
+        postedBy:
+          type: string
+          description: "`sub` operatora dla `MANUAL`/`REVERSAL` ręcznego; brak = system"
+        postings:
+          type: array
+          minItems: 2
+          items:
+            $ref: "#/components/schemas/Posting"
+        createdAt: { type: string, format: date-time }
+
+    JournalEntryPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/JournalEntry"
+        nextCursor:
+          type: [string, "null"]
+
+    ReverseEntryRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 280
+
+    PostingRequest:
+      type: object
+      required: [glAccountCode, amount]
+      properties:
+        glAccountCode:
+          type: string
+          pattern: "^[0-9]{4}(-[0-9a-fA-F-]{36})?$"
+          description: Kod konta GL; część UUID porównywana po normalizacji do małych liter
+        amount:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+          description: Ze znakiem (dodatnia = Wn, ujemna = Ma), niezerowa
+
+    ManualEntryRequest:
+      type: object
+      required: [description, reason, postings]
+      properties:
+        description:
+          type: string
+          minLength: 1
+          maxLength: 280
+          description: Opis zapisu widoczny w księdze
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 280
+          description: Uzasadnienie dla audytu (obowiązkowe; szczególnie przy `2000-*`)
+        valueDate:
+          type: string
+          format: date
+          description: Domyślnie = data księgowania
+        postings:
+          type: array
+          minItems: 2
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/PostingRequest"
+
+    DayCount:
+      type: string
+      enum: [ACT_365]
+
+    RateTier:
+      type: object
+      description: "Próg marginalny — stopa dla części salda do `upToMinor`; ostatni próg ma `upToMinor: null`."
+      required: [upToMinor, annualRateBp]
+      properties:
+        upToMinor:
+          type: [integer, "null"]
+          format: int64
+          minimum: 1
+          description: Górna granica progu w jednostkach mniejszych waluty produktu (`Product.currency`, dziś PLN); `null` = bez górnej granicy
+        annualRateBp:
+          type: integer
+          minimum: 0
+          maximum: 100000
+          description: Stopa roczna w punktach bazowych (500 = 5,00 %)
+
+    RateScheduleStatus:
+      type: string
+      description: Wyliczany przy odczycie względem bieżącej daty biznesowej (nie przechowywany).
+      enum: [SCHEDULED, IN_FORCE, SUPERSEDED]
+
+    RateSchedule:
+      type: object
+      required: [id, productCode, effectiveFrom, tiers, dayCount, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        productCode: { type: string }
+        effectiveFrom: { type: string, format: date }
+        tiers:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/RateTier"
+        dayCount:
+          $ref: "#/components/schemas/DayCount"
+        effectiveTo:
+          type: [string, "null"]
+          format: date
+          description: Dzień przed `effectiveFrom` następnego harmonogramu produktu; `null` = bez końca
+        status:
+          $ref: "#/components/schemas/RateScheduleStatus"
+        createdBy:
+          type: string
+          description: "`sub` administratora; brak = seed"
+        createdAt: { type: string, format: date-time }
+
+    RateSchedulePage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/RateSchedule"
+        nextCursor:
+          type: [string, "null"]
+
+    CreateRateScheduleRequest:
+      type: object
+      required: [productCode, effectiveFrom, tiers]
+      properties:
+        productCode: { type: string, minLength: 1 }
+        effectiveFrom:
+          type: string
+          format: date
+          description: Nie wcześniej niż następna data biznesowa
+        tiers:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/RateTier"
+        dayCount:
+          allOf:
+            - $ref: "#/components/schemas/DayCount"
+          default: ACT_365
+
+    BusinessDayStatus:
+      type: string
+      description: |
+        `PLANNED → OPEN → CLOSING → CLOSED` dla dni roboczych. Dni nierobocze (sb/nd/święta) nigdy nie są `OPEN`:
+        przechodzą `PLANNED → CLOSED` w tej samej transakcji EOD, która je pomija (`closedAt` ustawione, `openedAt` puste).
+      enum: [PLANNED, OPEN, CLOSING, CLOSED]
+
+    BusinessDay:
+      type: object
+      required: [date, businessDay, status]
+      properties:
+        date: { type: string, format: date }
+        businessDay:
+          type: boolean
+          description: Czy to dzień roboczy (pn–pt bez polskich świąt państwowych); dni nierobocze nigdy nie są `OPEN`
+        status:
+          $ref: "#/components/schemas/BusinessDayStatus"
+        openedAt: { type: string, format: date-time }
+        closedAt: { type: string, format: date-time }
+        closingJobRunId:
+          type: string
+          format: uuid
+          description: Najnowszy przebieg orkiestratora EOD tego dnia (trwający, nieudany albo ten, który zamknął dzień)
+
+    BusinessDayPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/BusinessDay"
+        nextCursor:
+          type: [string, "null"]
+
+    CurrentBusinessDay:
+      allOf:
+        - $ref: "#/components/schemas/BusinessDay"
+        - type: object
+          required: [nextBusinessDate, fastForwardAllowed]
+          properties:
+            previousBusinessDate: { type: string, format: date }
+            nextBusinessDate:
+              type: string
+              format: date
+              description: Dzień, który stanie się `OPEN` po EOD
+            fastForwardAllowed:
+              type: boolean
+              description: Czy `POST /business-days:close?times>1` jest dozwolony (`bank.allow-fast-forward`)
+
+    JobRunStatus:
+      type: string
+      enum: [RUNNING, SUCCEEDED, FAILED]
+
+    JobRun:
+      type: object
+      description: Przebieg zadania batch (`docs/domain-model.md` §3 `job_run`). Orkiestrator EOD ma `steps`.
+      required: [id, jobName, businessDate, status, startedAt]
+      properties:
+        id: { type: string, format: uuid }
+        jobName:
+          type: string
+          examples: [eod, eod.fast-forward, eod.expire-confirmations, eod.standing-orders, eod.accrual, eod.capitalization, eod.snapshots, outbox-relay]
+        businessDate: { type: string, format: date }
+        status:
+          $ref: "#/components/schemas/JobRunStatus"
+        parentRunId:
+          type: string
+          format: uuid
+          description: Dla kroków EOD — przebieg orkiestratora
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+        itemsProcessed:
+          type: integer
+          format: int64
+          minimum: 0
+        error:
+          type: string
+          description: Komunikat błędu dla `FAILED` (bez PII)
+        triggeredBy:
+          type: string
+          description: "`sub` administratora albo `scheduler`"
+        resumesRunId:
+          type: string
+          format: uuid
+          description: Dla wznowionego orkiestratora EOD — poprzedni przebieg `FAILED` tej samej `businessDate`
+        reconciliation:
+          allOf:
+            - $ref: "#/components/schemas/ReconciliationResult"
+          description: Wynik uzgodnienia kroku `eod.snapshots` (kopiowany też na orkiestrator); brak dla innych zadań
+        steps:
+          type: array
+          description: Tylko dla orkiestratora (`eod`, `eod.fast-forward`) w `GET /jobs/{id}` i odpowiedzi `202` — kroki w kolejności wykonania
+          items:
+            $ref: "#/components/schemas/JobRun"
+
+    JobRunPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/JobRun"
+        nextCursor:
+          type: [string, "null"]
+
+    ReconciliationCheckCode:
+      type: string
+      description: Kontrole z `docs/business-rules.md` §6 pkt 6
+      enum: [GL_INVARIANT, UNASSIGNED_INCOMING_ZERO, SUSPENSE_ZERO, CUSTOMER_CONTROL]
+
+    ReconciliationCheck:
+      type: object
+      required: [code, passed, difference]
+      properties:
+        code:
+          $ref: "#/components/schemas/ReconciliationCheckCode"
+        glAccountCode:
+          type: string
+          description: Konto, którego dotyczy kontrola (`2300`, `9000`, `2000`), jeśli dotyczy
+        passed:
+          type: boolean
+        difference:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+          description: Różnica ze znakiem; `0` gdy `passed`
+
+    ReconciliationResult:
+      type: object
+      description: Wynik uzgodnienia EOD. `passed = false` → dzień zostaje `CLOSING`, przebieg `FAILED`.
+      required: [passed, checks]
+      properties:
+        passed:
+          type: boolean
+        checks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReconciliationCheck"

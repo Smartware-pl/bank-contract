@@ -48,19 +48,21 @@ Wspólny język dla całego repo. Kod używa terminu angielskiego; polskie odpow
 
 Niezmiennik: `Σ Aktywa − Σ Zobowiązania − (Σ Przychody − Σ Koszty) = 0`, co jest równoważne z sumą wszystkich postingów równą zero.
 
+Saldo konta nadrzędnego (np. `2000`) to roll-up: własne postingi + postingi wszystkich potomków po `parent_code`. Postingi księguje się wyłącznie na kontach-liściach; `balance_snapshot` liczy się po liściach, a kontrola „Σ `2000-*` = `2000`" z reguł §6 porównuje roll-up z sumą snapshotów subkont.
+
 ## 3. Encje per moduł (tylko kluczowe pola)
 
 **customers**
 - `customer(id, keycloak_sub UNIQUE, email, full_name, status[ACTIVE|BLOCKED|CLOSED], version, created_at)`
 
 **accounts**
-- `product(code PK, name, kind[CURRENT|SAVINGS], allows_debit, allows_overdraft, overdraft_limit_minor, capitalization[MONTHLY|QUARTERLY|NONE], default_rate_schedule_id)`
+- `product(code PK, name, kind[CURRENT|SAVINGS], currency, allows_debit, allows_overdraft, overdraft_limit_minor, capitalization[MONTHLY|QUARTERLY|NONE], default_rate_schedule_id)` — `account.currency = product.currency` przy otwarciu; `default_rate_schedule_id` to harmonogram bazowy (seed), stopa dnia wybierana jest per produkt po `effective_from ≤ business_date`, nie przypinana do rachunku
 - `account(id, customer_id, product_code, iban UNIQUE, gl_account_code, currency, status, opened_on, closed_on, version)`
 - `account_hold(id, account_id, amount_minor, currency, reason, reference_type, reference_id, created_at, released_at)`
 
 **ledger**
 - `gl_account(code PK, name, type, parent_code, customer_account_id NULL)`
-- `journal_entry(id, type, booking_date, value_date, business_date, idempotency_key UNIQUE, reference_type, reference_id, reversal_of NULL, description, created_at)`
+- `journal_entry(id, sequence UNIQUE, type, booking_date, value_date, business_date, idempotency_key UNIQUE, reference_type, reference_id, reversal_of NULL, description, posted_by NULL, created_at)` — referencja dla ludzi `JE-<sequence>`; `reversed_by` wyprowadzane z `reversal_of` storna (co najwyżej jedno)
 - `posting(id, entry_id, gl_account_code, amount_minor ze znakiem, currency)`
 - `balance_snapshot(gl_account_code, business_date, balance_minor, PK(code,date))`
 
@@ -75,8 +77,8 @@ Niezmiennik: `Σ Aktywa − Σ Zobowiązania − (Σ Przychody − Σ Koszty) = 
 - `capitalization_run(id, account_id, period_start, period_end, gross_minor, tax_minor, net_minor, entry_id)`
 
 **batch**
-- `business_day(date PK, status[OPEN|CLOSING|CLOSED], opened_at, closed_at)`
-- `job_run(id, job_name, business_date, status, started_at, finished_at, error, items_processed)`
+- `business_day(date PK, is_business_day, status[PLANNED|OPEN|CLOSING|CLOSED], opened_at NULL, closed_at NULL, closing_job_run_id NULL)` — kalendarz zasiany z góry (reguły §6): przyszłe dni są `PLANNED`, dni nierobocze nigdy nie są `OPEN`
+- `job_run(id, job_name, business_date, status[RUNNING|SUCCEEDED|FAILED], parent_run_id NULL, resumes_run_id NULL, triggered_by, started_at, finished_at, error, items_processed, reconciliation JSONB NULL)` — orkiestrator EOD to `job_run` bez `parent_run_id`; kroki łańcucha z §6 to `job_run` z `parent_run_id` orkiestratora; `resumes_run_id` wskazuje nieudany przebieg przy wznowieniu
 
 **outbox** (core-api)
 - `outbox(id, type, version, topic, partition_key, aggregate_type, aggregate_id, correlation_id, causation_id NULL, business_date, payload JSONB, occurred_at, published_at NULL, attempts)`
@@ -91,7 +93,7 @@ Niezmiennik: `Σ Aktywa − Σ Zobowiązania − (Σ Przychody − Σ Koszty) = 
 
 ## 4. Maszyny stanów
 
-Płatność: patrz `integration-contracts.md` §3. Rachunek: `ACTIVE ⇄ BLOCKED`, `ACTIVE → CLOSED`. Dzień roboczy: `OPEN → CLOSING → CLOSED` (następny dzień `OPEN` powstaje w tej samej transakcji, która ustawia `CLOSED`). Klient: `ACTIVE ⇄ BLOCKED`, `→ CLOSED` tylko gdy wszystkie rachunki `CLOSED`.
+Płatność: patrz `integration-contracts.md` §3. Rachunek: `ACTIVE ⇄ BLOCKED`, `ACTIVE → CLOSED` (kolejność sprawdzeń w regułach §8). Dzień roboczy: `PLANNED → OPEN → CLOSING → CLOSED` (następny dzień roboczy przechodzi `PLANNED → OPEN` w tej samej transakcji, która ustawia `CLOSED`; pominięte dni nierobocze przechodzą `PLANNED → CLOSED` w tej samej transakcji). Po nieudanym EOD dzień zostaje `CLOSING` do wznowienia przez ADMIN — bez przejścia z powrotem do `OPEN`. Klient: `ACTIVE ⇄ BLOCKED`, `→ CLOSED` (z `ACTIVE` lub `BLOCKED`) tylko gdy wszystkie rachunki `CLOSED`; `CLOSED` jest terminalny.
 
 ## 5. Identyfikatory
 

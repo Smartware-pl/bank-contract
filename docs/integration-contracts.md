@@ -57,15 +57,21 @@ Grupy zasobów (tagi OpenAPI w nawiasach):
 | `/me/accounts`, `/me/accounts/{id}`, `/me/accounts/{id}/transactions` [customer] | CUSTOMER | Własne rachunki i historia (odczyt księgi przez `accounts`); kwoty w historii ze znakiem z perspektywy klienta (dodatni = uznanie); obcy rachunek → `404`, nie `403` |
 | `/me/payments`, `/me/payments/{id}`, `/me/payments/{id}/confirm` [customer] | CUSTOMER | Lista i utworzenie przelewu (`kind` ustala serwer po IBAN-ie odbiorcy), potwierdzenie kodem z e-maila, śledzenie statusu (UI odpytuje `GET` do stanu terminalnego) |
 | `/me/standing-orders`, `/me/standing-orders/{id}` [customer] | CUSTOMER | Zlecenia stałe: lista/utworzenie, odczyt/zmiana (`PUT` z `version`)/anulowanie (`DELETE` → `CANCELLED`) |
-| `/customers`, `/customers/{id}`, `/customers/{id}/accounts` [operator] | OPERATOR, ADMIN | Administracja klientami, otwieranie rachunków |
-| `/accounts/{id}`, `/accounts/{id}/holds` [operator] | OPERATOR, ADMIN | Szczegóły rachunku, ręczne blokady |
-| `/payments/{id}`, `/payments/{id}/return` [operator] | OPERATOR, ADMIN | Podgląd płatności, ręczny zwrot |
-| `/ledger/gl-accounts`, `/ledger/entries`, `/ledger/entries/{id}/reverse`, `/ledger/entries:manual` [operator] | OPERATOR (odczyt), ADMIN (zapis) | Przeglądanie GL, ręczne księgowanie, storno |
-| `/interest/rate-schedules` [operator] | ADMIN | Stopy produktów w czasie |
-| `/business-days`, `/business-days/current`, `/business-days:close` [admin] | ADMIN | Kalendarz i wyzwalacz EOD |
-| `/jobs`, `/jobs/{id}` [admin] | ADMIN | Przebiegi zadań batch |
+| `/customers`, `/customers/{id}`, `/customers/{id}/accounts` [operator] | OPERATOR, ADMIN | Lista/wyszukiwanie, utworzenie (`keycloakSub` istniejącego użytkownika), `PATCH` danych i statusu z `version`; rachunki klienta i otwarcie rachunku (`productCode`) |
+| `/products` [operator] | OPERATOR, ADMIN | Dane referencyjne produktów (nowe od 2026-09-10) |
+| `/accounts`, `/accounts/{id}`, `/accounts/{id}/transactions`, `/accounts/{id}/holds`, `/accounts/{id}/holds/{holdId}` [operator] | OPERATOR, ADMIN | Wyszukiwanie po IBAN/kliencie (nowe od 2026-09-10), szczegóły, `PATCH` statusu (`ACTIVE ⇄ BLOCKED`, `→ CLOSED`), historia (jak `/me/...`), blokady `MANUAL`: założenie i zwolnienie (`DELETE`) |
+| `/payments`, `/payments/{id}`, `/payments/{id}/return` [operator] | OPERATOR, ADMIN | Lista/wyszukiwanie (nowe od 2026-09-10), podgląd z `entryId`/`reversalEntryId`/`holdId`, ręczny zwrot (`reasonCode` ISO 20022 + uzasadnienie, opcjonalna `version`) wyłącznie dla `POSTED` — jedyne storno dostępne dla OPERATOR |
+| `/ledger/gl-accounts`, `/ledger/gl-accounts/{code}`, `/ledger/entries`, `/ledger/entries/{id}`, `/ledger/entries/{id}/reverse`, `/ledger/entries:manual` [operator] | OPERATOR (odczyt), ADMIN (zapis; `x-roles` w OpenAPI) | Plan kont z saldami ze znakiem (dodatnie = Wn; konta nadrzędne roll-up potomków), zapisy z postingami, storno (`reason`; wyłącznie księgowe, zapisy płatności → 409), ręczne księgowanie (≥ 2 postingi, suma 0, `reason`; `ledger` nie sprawdza statusu rachunku). Oba zapisy ADMIN dozwolone także w dniu `CLOSING` po nieudanym EOD (korekta uzgodnienia) |
+| `/interest/rate-schedules`, `/interest/rate-schedules/{id}` [operator] | OPERATOR (odczyt), ADMIN (zapis) | Harmonogramy stóp append-only: progi marginalne w punktach bazowych, `effectiveFrom` ≥ następna data biznesowa i unikalny per produkt; `status` (`SCHEDULED/IN_FORCE/SUPERSEDED`) i `effectiveTo` wyliczane przy odczycie |
+| `/business-days`, `/business-days/current`, `/business-days:close` [admin] | ADMIN | Kalendarz (`PLANNED/OPEN/CLOSING/CLOSED`, flaga dnia roboczego), bieżący dzień z `nextBusinessDate` i `fastForwardAllowed`; EOD zwraca `202` + `JobRun` orkiestratora `eod` (`times=N` tylko z fast-forward → przebieg nadrzędny `eod.fast-forward`); po przebiegu `FAILED` ponowne `close` wznawia łańcuch od nieudanego kroku (`resumesRunId`), przebieg `RUNNING` → 409 |
+| `/jobs`, `/jobs/{id}` [admin] | ADMIN | Przebiegi zadań batch; kroki EOD jako osobne przebiegi z `parentRunId`, orkiestrator niesie `steps`, `resumesRunId` przy wznowieniu i `reconciliation` (typowany wynik uzgodnienia z kroku `eod.snapshots`) |
 
 `customer-web` może wołać tylko `[customer]`; `backoffice-web` tylko `[operator]`/`[admin]`. Żadna inna aplikacja nie woła core-api po HTTP.
+Role per operacja są w OpenAPI jako rozszerzenie `x-roles` (tag grupuje ekran, `x-roles` mówi, kto może; operacje `[customer]`
+mają `x-roles: [CUSTOMER]`). Mutacje operatora zmieniające stan istniejącego agregatu lub księgę niosą `reason` (trafia do
+`audit`) i `version` tam, gdzie zmieniają agregat; utworzenie klienta, rachunku i harmonogramu audytuje się bez uzasadnienia.
+Semantyka `Idempotency-Key` (zakres per `sub`, odcisk żądania, snapshot odpowiedzi 2xx) i kursorów (porządek per lista,
+tie-break `id` malejąco) jest opisana przy parametrach w OpenAPI.
 
 ### Cykl życia płatności (co klient widzi w `status`)
 
@@ -82,7 +88,10 @@ CREATED ──▶ PENDING_CONFIRMATION ──▶ POSTED ──▶ SETTLED
 
 ### Stany rachunku
 
-`ACTIVE → BLOCKED (operator) → ACTIVE`, `ACTIVE → CLOSED` (tylko gdy saldo = 0 i brak blokad). Księgowania na `CLOSED` są odrzucane; na `BLOCKED` dozwolone tylko uznania.
+`ACTIVE → BLOCKED (operator) → ACTIVE`, `ACTIVE → CLOSED`. Zamknięcie w kolejności: brak aktywnych blokad → kapitalizacja
+naliczonych odsetek (wymaga dnia `OPEN`) → saldo po kapitalizacji musi być 0 (inaczej `409` `conflict` z `extensions.balance`,
+rachunek zostaje `ACTIVE`). Księgowania płatności na `CLOSED` są odrzucane; na `BLOCKED` dozwolone tylko uznania (reguła
+modułu `payments`; zapisy ręczne i storna ADMIN jej nie podlegają).
 
 ## 4. Szyna zdarzeń
 
