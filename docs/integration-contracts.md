@@ -34,7 +34,7 @@ Klienci:
 
 Role realmu: `CUSTOMER`, `OPERATOR`, `ADMIN`.
 Claimy tokenu, na których polega core-api: `sub` (mapuje na `customers.customer.keycloak_sub`), `realm_access.roles`, `email`.
-Czas życia access tokenu 5 min, refresh 30 min. Użytkownicy testowi tworzeni przez `infra/keycloak/seed-users.sh`.
+Czas życia access tokenu 5 min, refresh 30 min. Użytkownicy testowi tworzeni przez `bank-infra/keycloak/seed-users.sh`.
 
 ## 3. API HTTP core-api
 

@@ -44,7 +44,7 @@ Wspólny język dla całego repo. Kod używa terminu angielskiego; polskie odpow
 | `4000` | Koszt odsetkowy | Koszty | Obciążane przez dzienne naliczenie |
 | `4100` | Przychód z odsetek debetowych | Przychody | Dla produktów z saldem ujemnym |
 | `4200` | Przychód z opłat | Przychody | Etap 8 |
-| `9000` | Konto techniczne (suspense) | — | Parking dla korekt ręcznych; na EOD musi być zero |
+| `9000` | Konto techniczne (suspense) | Techniczne (`TECHNICAL`) | Parking dla korekt ręcznych; na EOD musi być zero |
 
 Niezmiennik: `Σ Aktywa − Σ Zobowiązania − (Σ Przychody − Σ Koszty) = 0`, co jest równoważne z sumą wszystkich postingów równą zero.
 
@@ -61,8 +61,8 @@ Saldo konta nadrzędnego (np. `2000`) to roll-up: własne postingi + postingi ws
 - `account_hold(id, account_id, amount_minor, currency, reason, reference_type, reference_id, created_at, released_at)`
 
 **ledger**
-- `gl_account(code PK, name, type, parent_code, customer_account_id NULL)`
-- `journal_entry(id, sequence UNIQUE, type, booking_date, value_date, business_date, idempotency_key UNIQUE, reference_type, reference_id, reversal_of NULL, description, posted_by NULL, created_at)` — referencja dla ludzi `JE-<sequence>`; `reversed_by` wyprowadzane z `reversal_of` storna (co najwyżej jedno)
+- `gl_account(code PK, name, type[ASSET|LIABILITY|INCOME|EXPENSE|TECHNICAL], parent_code, customer_account_id NULL)` — wartości `type` jak `GlAccountType` w OpenAPI
+- `journal_entry(id, sequence UNIQUE, type[TRANSFER|TRANSFER_OUT|TRANSFER_IN|REVERSAL|INTEREST_ACCRUAL|OVERDRAFT_ACCRUAL|CAPITALIZATION|MANUAL|FEE], booking_date, value_date, business_date, idempotency_key UNIQUE, reference_type, reference_id, reversal_of NULL, description, posted_by NULL, created_at)` — referencja dla ludzi `JE-<sequence>`; `reversed_by` wyprowadzane z `reversal_of` storna (co najwyżej jedno)
 - `posting(id, entry_id, gl_account_code, amount_minor ze znakiem, currency)`
 - `balance_snapshot(gl_account_code, business_date, balance_minor, PK(code,date))`
 
