@@ -66,8 +66,8 @@ każdy ma własny schemat DB. Granice weryfikuje `ApplicationModules.verify()` w
 | Moduł | Odpowiedzialność | Zależy od (tylko api) |
 |---|---|---|
 | `common` | `Money`, `Iban`, identyfikatory, wiring `Clock`, problem-details, filtr idempotencji, correlation id | — |
-| `customers` | Rekordy klientów, status, powiązanie z `sub` z Keycloak | common, outbox |
-| `accounts` | Produkty, rachunki, generowanie IBAN/NRB, saldo dostępne, blokady | common, ledger (odczyt sald), customers, outbox |
+| `customers` | Rekordy klientów, status, powiązanie z `sub` z Keycloak | common, outbox, batch (data biznesowa) |
+| `accounts` | Produkty, rachunki, generowanie IBAN/NRB, saldo dostępne, blokady; implementuje też endpointy `/customers/*`, bo łączą klienta z rachunkami | common, ledger (odczyt sald), customers, outbox, batch (data biznesowa) |
 | `ledger` | Plan kont, zapisy księgowe, postingi, storna, snapshoty sald | common, batch (data biznesowa i status dnia dla endpointów operatora) |
 | `payments` | Przelewy wewnętrzne/zewnętrzne, potwierdzenia, zlecenia stałe, maszyna stanów płatności; konsument zdarzeń izby (`bank.clearing.*`) przez `inbox` | common, accounts, ledger, batch (data biznesowa), outbox |
 | `interest` | Harmonogramy stóp, dzienne naliczanie, kapitalizacja, podatek | common, accounts, ledger, batch, outbox |
