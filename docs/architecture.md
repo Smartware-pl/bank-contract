@@ -66,12 +66,12 @@ każdy ma własny schemat DB. Granice weryfikuje `ApplicationModules.verify()` w
 | Moduł | Odpowiedzialność | Zależy od (tylko api) |
 |---|---|---|
 | `common` | `Money`, `Iban`, identyfikatory, wiring `Clock`, problem-details, filtr idempotencji, correlation id | — |
-| `customers` | Rekordy klientów, status, powiązanie z `sub` z Keycloak | common |
-| `accounts` | Produkty, rachunki, generowanie IBAN/NRB, saldo dostępne, blokady | common, ledger (odczyt sald), customers |
-| `ledger` | Plan kont, zapisy księgowe, postingi, storna, snapshoty sald | common |
-| `payments` | Przelewy wewnętrzne/zewnętrzne, potwierdzenia, zlecenia stałe, maszyna stanów płatności; konsument zdarzeń izby (`bank.clearing.*`) przez `inbox` | common, accounts, ledger, batch (data biznesowa) |
-| `interest` | Harmonogramy stóp, dzienne naliczanie, kapitalizacja, podatek | common, accounts, ledger, batch |
-| `batch` | Kalendarz biznesowy, orkiestracja EOD, przebiegi zadań, blokady schedulera | common, publikuje `BusinessDayClosed` |
+| `customers` | Rekordy klientów, status, powiązanie z `sub` z Keycloak | common, outbox, batch (data biznesowa) |
+| `accounts` | Produkty, rachunki, generowanie IBAN/NRB, saldo dostępne, blokady; implementuje też endpointy `/customers/*`, bo łączą klienta z rachunkami | common, ledger (odczyt sald), customers, outbox, batch (data biznesowa) |
+| `ledger` | Plan kont, zapisy księgowe, postingi, storna, snapshoty sald | common, batch (data biznesowa i status dnia dla endpointów operatora) |
+| `payments` | Przelewy wewnętrzne/zewnętrzne, potwierdzenia, zlecenia stałe, maszyna stanów płatności; konsument zdarzeń izby (`bank.clearing.*`) przez `inbox` | common, accounts, customers (e-mail do zdarzeń, klient z `sub`), ledger, batch (data biznesowa), outbox |
+| `interest` | Harmonogramy stóp, dzienne naliczanie, kapitalizacja, podatek | common, accounts, ledger, batch, outbox |
+| `batch` | Kalendarz biznesowy, orkiestracja EOD, przebiegi zadań, blokady schedulera | common, outbox; publikuje `BusinessDayClosed`. Nie zależy od modułów księgowych — kroki EOD (snapshoty, naliczenia) wyzwala zdarzeniami Modulith, bo `ledger`, `payments` i `interest` zależą od `batch` (brak cykli) |
 | `outbox` | Tabela outbox, relay publikujący na Redpandę (profil `batch`), rejestr `inbox` dla konsumowanych zdarzeń | common |
 | `audit` | Przekrojowy dziennik audytu komend | common |
 
@@ -89,7 +89,7 @@ Compose dev uruchamia jedną instancję z obydwoma profilami.
 ### Persystencja
 
 - Jedna baza `bank`, schematy: `common`, `customers`, `accounts`, `ledger`, `payments`, `interest`, `batch`, `outbox`, `audit`, `shedlock`.
-- Migracje Flyway per moduł w `apps/core-api/src/main/resources/db/migration/<module>/`.
+- Migracje Flyway per moduł w `src/main/resources/db/migration/<module>/` (repo `bank-core-api`).
 - Kod jOOQ generowany z zmigrowanego schematu w czasie builda.
 - Append-only na `ledger.journal_entry` i `ledger.posting` wymuszone triggerem `BEFORE UPDATE OR DELETE` rzucającym wyjątek.
 
@@ -127,9 +127,9 @@ Cel: sprawić, żeby przelewy zewnętrzne wyglądały realnie bez drugiego banku
 
 ## 5. Przekrojowe
 
-- **Tożsamość**: realm Keycloak `bank`; klienci `customer-web`, `backoffice-web`, `core-api`, `clearing-sim` (client-credentials). Eksport realmu w `infra/keycloak/realm-bank.json`.
+- **Tożsamość**: realm Keycloak `bank`; klienci `customer-web`, `backoffice-web`, `core-api` (`clearing-sim` nie ma klienta — nie woła core-api, patrz `integration-contracts.md` §2). Eksport realmu w `bank-infra/keycloak/realm-bank.json`.
 - **Obserwowalność**: Actuator health/metrics; logi JSON z `correlationId`, `businessDate`, `module`; `correlationId` wędruje w kopercie zdarzenia, więc jeden przelew da się prześledzić przez wszystkie aplikacje. Redpanda Console pokazuje tematy i lag konsumentów. Prometheus/Grafana opcjonalne i poza zakresem do etapu 8.
-- **Konfiguracja**: zmienne środowiskowe 12-factor, udokumentowane w `integration-contracts.md` §6. `infra/.env.example` trzyma wartości dev.
+- **Konfiguracja**: zmienne środowiskowe 12-factor, udokumentowane w `integration-contracts.md` §6. `bank-infra/.env.example` trzyma wartości dev.
 
 ## 6. Roadmapa i Definition of Done
 

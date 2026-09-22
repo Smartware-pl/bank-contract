@@ -12,7 +12,7 @@ Nigdy nie odstępuj od zasad po cichu.
 
 ## 1. Czym jest ten projekt
 
-Sandboxowy system bankowy budowany przez jedną osobę. Prawdziwa semantyka księgowa, nieprawdziwe pieniądze.
+Sandboxowy system bankowy budowany przez dwuosobowy zespół (ADR-005). Prawdziwa semantyka księgowa, nieprawdziwe pieniądze.
 System ma *żyć*: dni robocze się zamykają, odsetki naliczają się i kapitalizują, przelewy przechodzą przez
 symulowaną izbę rozliczeniową. Aplikacje komunikują się asynchronicznie przez szynę zdarzeń; HTTP służy tylko
 do synchronicznych zapytań i komend z UI. Poprawność księgowa jest ważniejsza niż liczba funkcji. Błędne saldo to bug P0;
@@ -103,7 +103,7 @@ Dodanie zależności wprowadzającej nową *kategorię* (cache, wyszukiwarka, OR
 ### Bezpieczeństwo
 - core-api jest OAuth2 resource server; role pochodzą z ról realmu w JWT: `CUSTOMER`, `OPERATOR`, `ADMIN`.
 - Sprawdzanie własności (klient widzi tylko swoje rachunki) jest w warstwie serwisów, nie tylko w kontrolerach.
-- Sekrety ze zmiennych środowiskowych. Nigdy nie commituj sekretów; domyślne wartości dev są w `infra/.env.example`.
+- Sekrety ze zmiennych środowiskowych. Nigdy nie commituj sekretów; domyślne wartości dev są w `bank-infra/.env.example`.
 - Żadnego PII w logach. Loguj id, nie nazwiska ani IBAN-y (IBAN maskuj do ostatnich 4 znaków).
 
 ### API HTTP
