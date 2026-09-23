@@ -49,6 +49,7 @@ Konwencje:
 - Błędy: `application/problem+json`, `type` to `https://bank.local/problems/<slug>`. Stabilne slugi:
   `validation`, `not-found`, `forbidden`, `insufficient-funds`, `limit-exceeded`, `duplicate-request`, `conflict`, `business-day-closed`, `invalid-iban`, `unbalanced-entry`.
   Nowe od 2026-09-10: `confirmation-failed` (błędny kod; `extensions.attemptsLeft`), `confirmation-expired` (kod wygasł lub próby wyczerpane; płatność `REJECTED`).
+  Nowe od 2026-09-23 (v0.4): `not-implemented` — `501`, operacja jest w kontrakcie, ale core-api jeszcze jej nie wdrożyło. Kontrakt wyprzedza implementację celowo (fronty generują z niego typy i budują ekrany na mockach), więc odpowiedź jest normalną, stabilną częścią API, a nie awarią: nic nie zmienia, można powtórzyć po wdrożeniu. Dziś dotyczy `/me/notifications`, `/me/notifications/{id}:read`, `/me/accounts/{id}/statements`, `/me/accounts/{id}/statements/{yyyy-MM}.pdf` i `POST /accounts/{id}/fees`; lista kurczy się z każdym etapem i znika, gdy etap 9 i moduł powiadomień będą gotowe.
   Nowe od 2026-09-23 (v0.4): `upstream-unavailable` — `503`, zależność zewnętrzna core-api (dziś wyłącznie broker szyny w `/ops/*`) nie odpowiada; stan banku nienaruszony, żądanie można powtórzyć. Poza `/ops/*` nie występuje.
   `Problem` niesie dodatkowo `correlationId` (UI pokazuje go przy nieznanym slugu), `errors[]{field,message}` dla `validation` oraz `extensions` (pola specyficzne dla slugu).
 - Paginacja: `?cursor=&limit=` → `{ "items": [], "nextCursor": "…|null" }`.

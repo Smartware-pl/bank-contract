@@ -435,6 +435,7 @@ paths:
       x-roles: [CUSTOMER]
       summary: Powiadomienia zalogowanego klienta
       description: |
+        Jeszcze niewdrożone w core-api — dziś `501` `not-implemented`.
         Projekcja zdarzeń dotyczących klienta (`docs/integration-contracts.md` §4) na listę do dzwonka
         w `customer-web`. Porządek `occurredAt` malejąco, tie-break `id` malejąco. Powiadomienie jest wyłącznie
         pochodną zdarzenia — nigdy źródłem prawdy o stanie banku. Nowe w v0.4.
@@ -458,6 +459,7 @@ paths:
         "400": { $ref: "#/components/responses/Validation" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
 
   /me/notifications/{notificationId}:read:
     parameters:
@@ -468,6 +470,7 @@ paths:
       x-roles: [CUSTOMER]
       summary: Oznaczenie powiadomienia jako przeczytanego
       description: |
+        Jeszcze niewdrożone w core-api — dziś `501` `not-implemented`.
         Ustawia `readAt` na bieżącą chwilę, jeśli było `null`. Operacja jest idempotentna także bez powtórzenia
         klucza: ponowne wywołanie zwraca `200` z niezmienionym `readAt`. Powiadomienie innego klienta → `404`.
         Nowe w v0.4.
@@ -485,6 +488,7 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
 
   /me/beneficiaries:
     get:
@@ -576,7 +580,8 @@ paths:
       x-roles: [CUSTOMER]
       summary: Wyciągi miesięczne rachunku
       description: |
-        Etap 9 (`docs/architecture.md` §6). Lista wygenerowanych wyciągów, najnowszy pierwszy; jeden wyciąg na
+        Etap 9 (`docs/architecture.md` §6), jeszcze niewdrożone — dziś `501` `not-implemented`.
+        Lista wygenerowanych wyciągów, najnowszy pierwszy; jeden wyciąg na
         pełny miesiąc kalendarzowy zamknięty przez EOD. Salda pochodzą z postingów księgi. Obcy rachunek → `404`.
         Nowe w v0.4.
       parameters:
@@ -593,6 +598,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
 
   /me/accounts/{accountId}/statements/{period}.pdf:
     parameters:
@@ -604,7 +610,8 @@ paths:
       x-roles: [CUSTOMER]
       summary: Wyciąg miesięczny w PDF
       description: |
-        Etap 9. Zwraca PDF wyciągu za `period` (`yyyy-MM`). Miesiąc bez wyciągu (jeszcze niezamknięty przez EOD
+        Etap 9, jeszcze niewdrożone — dziś `501` `not-implemented`.
+        Zwraca PDF wyciągu za `period` (`yyyy-MM`). Miesiąc bez wyciągu (jeszcze niezamknięty przez EOD
         albo rachunek otwarty później) → `404`. Nowe w v0.4.
       responses:
         "200":
@@ -622,6 +629,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
 
   # ───────────────────────────── operator: dane referencyjne ─────────────────────────────
 
@@ -1703,7 +1711,8 @@ paths:
       x-roles: [ADMIN]
       summary: Ręczne naliczenie opłaty na rachunku
       description: |
-        Etap 9 (`docs/architecture.md` §6). Księguje zapis `FEE`: obciążenie subkonta rachunku `2000-<accountId>`
+        Etap 9 (`docs/architecture.md` §6), jeszcze niewdrożone — dziś `501` `not-implemented`.
+        Księguje zapis `FEE`: obciążenie subkonta rachunku `2000-<accountId>`
         i uznanie `4200` (przychód z opłat), kwotą z `FeeDefinition.amount` produktu rachunku.
         Błędy: `feeCode` spoza cennika produktu → `422` `validation`; rachunek w statusie blokującym obciążenie
         (`CLOSED`) → `409` `conflict` z `extensions.status`; saldo dostępne nie pokrywa opłaty → `422`
@@ -1742,6 +1751,7 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        "501": { $ref: "#/components/responses/NotImplemented" }
 
   /audit:
     get:
@@ -2003,6 +2013,17 @@ components:
           schema:
             $ref: "#/components/schemas/Problem"
 
+    NotImplemented:
+      description: |
+        Operacja jest w kontrakcie, ale core-api jeszcze jej nie wdrożyło — `type` = `not-implemented`.
+        Kontrakt wyprzedza implementację celowo (fronty generują z niego typy i budują ekrany, zanim backend
+        dowiezie etap), więc to normalna, stabilna odpowiedź, a nie awaria: nic nie zostało zmienione,
+        żądanie można powtórzyć po wdrożeniu. Lista operacji zwracających dziś `501` jest
+        w `docs/integration-contracts.md` §3 i kurczy się z każdym etapem. Nowe w v0.4.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
     UpstreamUnavailable:
       description: |
         Zależność zewnętrzna core-api (dziś: broker szyny) nie odpowiada — `type` = `upstream-unavailable`.

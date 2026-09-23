@@ -70,7 +70,7 @@ każdy ma własny schemat DB. Granice weryfikuje `ApplicationModules.verify()` w
 | `accounts` | Produkty, rachunki, generowanie IBAN/NRB, saldo dostępne, blokady; implementuje też endpointy `/customers/*`, bo łączą klienta z rachunkami | common, ledger (odczyt sald), customers, outbox, batch (data biznesowa) |
 | `ledger` | Plan kont, zapisy księgowe, postingi, storna, snapshoty sald | common, batch (data biznesowa i status dnia dla endpointów operatora) |
 | `payments` | Przelewy wewnętrzne/zewnętrzne, potwierdzenia, zlecenia stałe, maszyna stanów płatności; konsument zdarzeń izby (`bank.clearing.*`) przez `inbox` | common, accounts, customers (e-mail do zdarzeń, klient z `sub`), ledger, batch (data biznesowa), outbox |
-| `interest` | Harmonogramy stóp, dzienne naliczanie, kapitalizacja, podatek | common, accounts, ledger, batch, outbox |
+| `interest` | Harmonogramy stóp, dzienne naliczanie, kapitalizacja, podatek; od v0.4 implementuje też `/me/accounts*` i `/me/products` (widok klienta z odsetkami), bo `accounts` nie może zależeć od `interest` (cykl) | common, accounts, customers, ledger, batch, outbox |
 | `batch` | Kalendarz biznesowy, orkiestracja EOD, przebiegi zadań, blokady schedulera | common, outbox; publikuje `BusinessDayClosed`. Nie zależy od modułów księgowych — kroki EOD (snapshoty, naliczenia) wyzwala zdarzeniami Modulith, bo `ledger`, `payments` i `interest` zależą od `batch` (brak cykli) |
 | `outbox` | Tabela outbox, relay publikujący na Redpandę (profil `batch`), rejestr `inbox` dla konsumowanych zdarzeń | common |
 | `audit` | Przekrojowy dziennik audytu komend | common |
