@@ -54,11 +54,13 @@ Saldo konta nadrzędnego (np. `2000`) to roll-up: własne postingi + postingi ws
 
 **customers**
 - `customer(id, keycloak_sub UNIQUE, email, full_name, status[ACTIVE|BLOCKED|CLOSED], version, created_at)`
+- `beneficiary(id, customer_id, name, iban, created_at, UNIQUE(customer_id, iban))` — książka odbiorców klienta (v0.4, `/me/beneficiaries`). Czysta wygoda UI: nie jest referencją dla żadnej płatności ani zapisu księgowego, usunięcie wpisu nie dotyka historii. **Propozycja do decyzji w PR:** encja należy do `customers`, bo jej cyklem życia rządzi klient, a nie płatność; alternatywą było `payments`, odrzucona, żeby moduł księgujący nie trzymał danych adresowych
 
 **accounts**
 - `product(code PK, name, kind[CURRENT|SAVINGS], currency, allows_debit, allows_overdraft, overdraft_limit_minor, capitalization[MONTHLY|QUARTERLY|NONE], default_rate_schedule_id)` — `account.currency = product.currency` przy otwarciu; `default_rate_schedule_id` to harmonogram bazowy (seed), stopa dnia wybierana jest per produkt po `effective_from ≤ business_date`, nie przypinana do rachunku
 - `account(id, customer_id, product_code, iban UNIQUE, gl_account_code, currency, status, opened_on, closed_on, version)`
 - `account_hold(id, account_id, amount_minor, currency, reason, reference_type, reference_id, created_at, released_at)`
+- `account_statement(account_id, period, opening_balance_minor, closing_balance_minor, currency, transactions_count, generated_at, pdf_path, PK(account_id, period))` — wyciąg miesięczny (v0.4 / etap 9, `/me/accounts/{id}/statements`). `period` to `yyyy-MM`; wiersz powstaje w EOD zamykającym ostatni dzień roboczy miesiąca. Salda są migawką wyliczoną z postingów — źródłem prawdy pozostaje księga. **Propozycja do decyzji w PR:** moduł `accounts` (wyciąg jest atrybutem rachunku i tam jest już historia); alternatywa `batch` odrzucona, bo `batch` uruchamia zadania, a nie trzyma danych klienta
 
 **ledger**
 - `gl_account(code PK, name, type[ASSET|LIABILITY|INCOME|EXPENSE|TECHNICAL], parent_code, customer_account_id NULL)` — wartości `type` jak `GlAccountType` w OpenAPI
@@ -67,9 +69,14 @@ Saldo konta nadrzędnego (np. `2000`) to roll-up: własne postingi + postingi ws
 - `balance_snapshot(gl_account_code, business_date, balance_minor, PK(code,date))`
 
 **payments**
-- `payment(id, kind[INTERNAL|EXTERNAL_OUT|EXTERNAL_IN], status, debtor_account_id NULL, creditor_account_id NULL, debtor_iban, creditor_iban, creditor_name, amount_minor, currency, title, requested_date, hold_id, entry_id, reversal_entry_id, clearing_ref, reason_code, idempotency_key, version, created_at, posted_at, settled_at)`
+- `payment(id, kind[INTERNAL|EXTERNAL_OUT|EXTERNAL_IN], status, debtor_account_id NULL, creditor_account_id NULL, debtor_iban, creditor_iban, creditor_name, amount_minor, currency, title, requested_date, hold_id, entry_id, reversal_entry_id, clearing_ref, reason_code, standing_order_id NULL, idempotency_key, version, created_at, posted_at, settled_at)` — `standing_order_id` (kolumna od 2026-09-22) wskazuje zlecenie stałe, którego wykonaniem jest płatność; od v0.4 wystawiane w kontrakcie jako `Payment.standingOrderId` i filtr `?standingOrderId=`
 - `payment_confirmation(payment_id, code_hash, expires_at, attempts)`
 - `standing_order(id, customer_id, debtor_account_id, creditor_iban, creditor_name, amount_minor, currency, title, frequency[MONTHLY|WEEKLY], day_of_period, next_run_date, status)`
+
+**messaging** (propozycja do decyzji w PR — v0.4)
+- `customer_notification(id, customer_id, event_id UNIQUE, type, occurred_at, title, body, read_at NULL, payment_id NULL, account_id NULL, standing_order_id NULL)` — powiadomienie w aplikacji (`/me/notifications`), projekcja zdarzenia z szyny na listę dla jednego klienta; `event_id` (id koperty) daje idempotencję, `type` to `type` zdarzenia z `integration-contracts.md` §4. Kolumny `*_id` są identyfikatorami do linkowania z UI, nie kluczami obcymi między schematami.
+- Nazwa modułu celowo NIE brzmi `notifications` — tak nazywa się osobna aplikacja wysyłająca maile (`CLAUDE.md` §3); ta encja żyje w core-api, bo `/me/notifications` to REST z core-api, a jedynym źródłem prawdy o stanie banku jest jego baza.
+- **Propozycja:** nowy moduł `messaging` (własny schemat, konsumuje zdarzenia domenowe kilku modułów — `payments`, `interest`, `accounts` — więc nie należy do żadnego z nich). Alternatywa: tabela w `payments`, odrzucona, bo kapitalizacja i otwarcie rachunku nie są płatnościami. Nowy moduł zmienia listę modułów w `CLAUDE.md` §5 — patrz `adr/ADR-008-powiadomienia-jako-projekcja-zdarzen.md`.
 
 **interest**
 - `rate_schedule(id, product_code, effective_from, tiers JSONB [{upToMinor|null, annualRateBp}], day_count[ACT_365], created_at)`
@@ -89,7 +96,7 @@ Saldo konta nadrzędnego (np. `2000`) to roll-up: własne postingi + postingi ws
 - `notification(id, event_id, customer_id, channel[EMAIL], template, sent_at, status)`
 
 **audit**
-- `audit_log(id, actor_sub, actor_roles, command, aggregate_type, aggregate_id, correlation_id, outcome, at)`
+- `audit_log(id, actor_sub NULL, actor_roles, command, path, aggregate_type NULL, aggregate_id NULL, correlation_id NULL, outcome[SUCCEEDED|REJECTED|FAILED], http_status, reason NULL, flagged, at)` — append-only (trigger odrzuca UPDATE/DELETE). `command` to `METODA <wzorzec ścieżki z kontraktu>` (np. `POST /api/v1/ledger/entries:manual`), `path` to konkretna ścieżka żądania, `aggregate_type` to pierwszy segment po `/api/v1`, `aggregate_id` pierwsza zmienna ścieżki. `flagged` = komenda księgowa (zapis ręczny, storno, opłata). Od v0.4 wystawiane przez `GET /audit` jako `AuditEntry` (`command` → `action`, `at` → `occurredAt`, `actor_sub`/`actor_roles` → `actor{sub,roles}`)
 
 ## 4. Maszyny stanów
 

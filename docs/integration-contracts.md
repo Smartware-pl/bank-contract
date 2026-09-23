@@ -49,6 +49,7 @@ Konwencje:
 - Błędy: `application/problem+json`, `type` to `https://bank.local/problems/<slug>`. Stabilne slugi:
   `validation`, `not-found`, `forbidden`, `insufficient-funds`, `limit-exceeded`, `duplicate-request`, `conflict`, `business-day-closed`, `invalid-iban`, `unbalanced-entry`.
   Nowe od 2026-09-10: `confirmation-failed` (błędny kod; `extensions.attemptsLeft`), `confirmation-expired` (kod wygasł lub próby wyczerpane; płatność `REJECTED`).
+  Nowe od 2026-09-23 (v0.4): `upstream-unavailable` — `503`, zależność zewnętrzna core-api (dziś wyłącznie broker szyny w `/ops/*`) nie odpowiada; stan banku nienaruszony, żądanie można powtórzyć. Poza `/ops/*` nie występuje.
   `Problem` niesie dodatkowo `correlationId` (UI pokazuje go przy nieznanym slugu), `errors[]{field,message}` dla `validation` oraz `extensions` (pola specyficzne dla slugu).
 - Paginacja: `?cursor=&limit=` → `{ "items": [], "nextCursor": "…|null" }`.
 
@@ -68,6 +69,19 @@ Grupy zasobów (tagi OpenAPI w nawiasach):
 | `/interest/rate-schedules`, `/interest/rate-schedules/{id}` [operator] | OPERATOR (odczyt), ADMIN (zapis) | Harmonogramy stóp append-only: progi marginalne w punktach bazowych, `effectiveFrom` ≥ następna data biznesowa i unikalny per produkt; `status` (`SCHEDULED/IN_FORCE/SUPERSEDED`) i `effectiveTo` wyliczane przy odczycie |
 | `/business-days`, `/business-days/current`, `/business-days:close` [admin] | ADMIN | Kalendarz (`PLANNED/OPEN/CLOSING/CLOSED`, flaga dnia roboczego), bieżący dzień z `nextBusinessDate` i `fastForwardAllowed`; EOD zwraca `202` + `JobRun` orkiestratora `eod` (`times=N` tylko z fast-forward → przebieg nadrzędny `eod.fast-forward`); po przebiegu `FAILED` ponowne `close` wznawia łańcuch od nieudanego kroku (`resumesRunId`), przebieg `RUNNING` → 409 |
 | `/jobs`, `/jobs/{id}` [admin] | ADMIN | Przebiegi zadań batch; kroki EOD jako osobne przebiegi z `parentRunId`, orkiestrator niesie `steps`, `resumesRunId` przy wznowieniu i `reconciliation` (typowany wynik uzgodnienia z kroku `eod.snapshots`) |
+| `/me/products` [customer] | CUSTOMER | Produkty w widoku klienta: ten sam `ProductPage` co `[operator] /products`, bez `defaultRateScheduleId`, za to z `currentRate` (progi harmonogramu `IN_FORCE` jako `{upTo: Money\|null, annualRateBp}`) i `fees` (nowe od 2026-09-23 (v0.4)) |
+| `/me/notifications`, `/me/notifications/{id}:read` [customer] | CUSTOMER | Powiadomienia w aplikacji jako projekcja zdarzeń klienta z szyny (§4, ADR-008): lista z `unreadOnly` i `unreadCount`, oznaczenie przeczytanego (idempotentne, `200` z `Notification`). Projekcja nigdy nie jest źródłem prawdy — pełne dane pod `refs` (nowe od 2026-09-23 (v0.4)) |
+| `/me/beneficiaries`, `/me/beneficiaries/{id}` [customer] | CUSTOMER | Książka odbiorców klienta: lista, dodanie (walidacja IBAN mod 97, para (klient, IBAN) unikalna → `409`), usunięcie (`204`, idempotentne). Wyłącznie wygoda UI — nie wpływa na płatności ani na księgę (nowe od 2026-09-23 (v0.4)) |
+| `/me/accounts/{id}/statements`, `/me/accounts/{id}/statements/{yyyy-MM}.pdf` [customer] | CUSTOMER | Wyciągi miesięczne: lista z saldem otwarcia/zamknięcia i liczbą pozycji, pobranie PDF (`application/pdf`). Etap 9 (nowe od 2026-09-23 (v0.4)) |
+| `/customers/{id}/standing-orders` [operator] | OPERATOR, ADMIN | Zlecenia stałe klienta w Kliencie 360 (kształt jak `[customer] /me/standing-orders`); wykonania zlecenia przez `GET /payments?standingOrderId=` (nowe od 2026-09-23 (v0.4)) |
+| `/accounts/{id}/fees` [operator] | ADMIN | Ręczne naliczenie opłaty z cennika produktu: zapis `FEE` (obciążenie `2000-<accountId>`, uznanie `4200`), kwota z `FeeDefinition`, `reason` do audytu, wpis `flagged`. Etap 9 (nowe od 2026-09-23 (v0.4)) |
+| `/audit` [operator] | OPERATOR (ograniczony), ADMIN | Dziennik audytu komend (`audit.audit_log`, append-only): filtry `actor`, `aggregateType`, `aggregateId`, `from`, `to`, `flagged`, kursor. `ADMIN` widzi wszystko; `OPERATOR` wyłącznie wpisy agregatów dostępnych mu przez własne endpointy (`aggregateType` ∈ `customers`, `accounts`, `payments`) oraz wpisy, których jest aktorem — `ledger`, `interest`, `business-days`, `jobs` są dla niego niewidoczne. Ograniczenie jest w warstwie serwisu, nie w kontrolerze (nowe od 2026-09-23 (v0.4)) |
+| `/ops/consumers`, `/ops/dlq` [admin] | ADMIN | Diagnostyka szyny z core-api przez Kafka `AdminClient` (ADR-007): lag grup konsumentów (bez paginacji) i podgląd `bank.<domena>.v1.dlq` (kursor, filtr `topic`, `payload` jako tekst). Tylko odczyt — bez ponawiania i kasowania; broker niedostępny → `503` `upstream-unavailable` (nowe od 2026-09-23 (v0.4)) |
+
+Nowe od 2026-09-23 (v0.4), addytywnie w istniejących grupach: `Account` niesie `accruedInterest`, `rateScheduleId`
+i `nextCapitalizationDate` (wszystkie opcjonalne, wyliczane przy odczycie — stopa nadal nie jest przypinana do rachunku);
+`Payment` niesie `standingOrderId` (kolumna `payment.standing_order_id`), a `GET /me/payments` i `GET /payments` mają filtr
+`?standingOrderId=`; `Product` niesie `currentRate` i `fees`.
 
 `customer-web` może wołać tylko `[customer]`; `backoffice-web` tylko `[operator]`/`[admin]`. Żadna inna aplikacja nie woła core-api po HTTP.
 Role per operacja są w OpenAPI jako rozszerzenie `x-roles` (tag grupuje ekran, `x-roles` mówi, kto może; operacje `[customer]`
