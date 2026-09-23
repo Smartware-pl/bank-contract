@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: bank core-api
-  version: 0.2.0
+  version: 0.4.0
   description: |
     Kontrakt REST `core-api` (`/api/v1`). Normatywny dla wszystkich aplikacji webowych; klienty generują się
     z tego pliku w czasie builda (`docs/architecture.md` §1a). Zmiany są wyłącznie addytywne
@@ -10,6 +10,8 @@ info:
     Tagi: `customer` (rola CUSTOMER, używa `customer-web`), `operator` (OPERATOR i ADMIN; zapisy księgowe
     i stopy tylko ADMIN — patrz `x-roles` operacji) oraz `admin` (tylko ADMIN). `backoffice-web` używa `operator`/`admin`.
     Historia: v0.1 (2026-09-10) endpointy `customer`; v0.2 (2026-09-10) endpointy `operator`/`admin`.
+    v0.4 (2026-09-23) addytywnie: `/audit`, odsetki i produkty dla klienta, `standingOrderId` w płatnościach,
+    `/me/notifications`, `/me/beneficiaries`, `/ops/*`, wyciągi i opłaty (etap 9).
 
     Konwencje:
     - kwoty `Money = {minor, currency}`; nigdy liczby zmiennoprzecinkowe;
@@ -148,6 +150,11 @@ paths:
           required: false
           schema: { type: string, format: uuid }
           description: Tylko płatności powiązane z tym rachunkiem klienta
+        - name: standingOrderId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+          description: Tylko wykonania tego zlecenia stałego (nowe w v0.4)
       responses:
         "200":
           description: Strona płatności
@@ -391,6 +398,227 @@ paths:
       responses:
         "204":
           description: Anulowane
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ───────────────────────────── klient: nowe w v0.4 ─────────────────────────────
+
+  /me/products:
+    get:
+      tags: [customer]
+      operationId: listMyProducts
+      x-roles: [CUSTOMER]
+      summary: Oprocentowanie i cennik produktów (widok klienta)
+      description: |
+        Publiczny widok danych referencyjnych: ten sam `ProductPage`, co `[operator] GET /products`, ale bez pól
+        operatorskich — `defaultRateScheduleId` nie jest zwracane. Każdy produkt niesie `currentRate` (progi
+        harmonogramu obowiązującego na bieżącą datę biznesową, `docs/business-rules.md` §7) oraz `fees`, jeśli
+        produkt ma cennik (etap 9). Porządek `code` rosnąco. Nowe w v0.4.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Strona produktów w widoku klienta
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductPage"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /me/notifications:
+    get:
+      tags: [customer]
+      operationId: listMyNotifications
+      x-roles: [CUSTOMER]
+      summary: Powiadomienia zalogowanego klienta
+      description: |
+        Projekcja zdarzeń dotyczących klienta (`docs/integration-contracts.md` §4) na listę do dzwonka
+        w `customer-web`. Porządek `occurredAt` malejąco, tie-break `id` malejąco. Powiadomienie jest wyłącznie
+        pochodną zdarzenia — nigdy źródłem prawdy o stanie banku. Nowe w v0.4.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: unreadOnly
+          in: query
+          required: false
+          description: "`true` = tylko nieprzeczytane (`readAt` = `null`); domyślnie `false`"
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Strona powiadomień
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationPage"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /me/notifications/{notificationId}:read:
+    parameters:
+      - $ref: "#/components/parameters/NotificationId"
+    post:
+      tags: [customer]
+      operationId: markMyNotificationRead
+      x-roles: [CUSTOMER]
+      summary: Oznaczenie powiadomienia jako przeczytanego
+      description: |
+        Ustawia `readAt` na bieżącą chwilę, jeśli było `null`. Operacja jest idempotentna także bez powtórzenia
+        klucza: ponowne wywołanie zwraca `200` z niezmienionym `readAt`. Powiadomienie innego klienta → `404`.
+        Nowe w v0.4.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Powiadomienie po oznaczeniu
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Notification"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /me/beneficiaries:
+    get:
+      tags: [customer]
+      operationId: listMyBeneficiaries
+      x-roles: [CUSTOMER]
+      summary: Książka odbiorców klienta
+      description: Porządek `name` rosnąco, tie-break `id` malejąco. Nowe w v0.4.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Strona odbiorców
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BeneficiaryPage"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [customer]
+      operationId: createMyBeneficiary
+      x-roles: [CUSTOMER]
+      summary: Dodanie odbiorcy do książki
+      description: |
+        `iban` jest walidowany mod 97 (`422` `invalid-iban`); książka nie sprawdza, czy rachunek istnieje w tym
+        banku. Para (klient, `iban`) jest unikalna — powtórzony IBAN → `409` `conflict`. Wpis książki nie wpływa
+        na żadną płatność ani na księgę. Nowe w v0.4.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBeneficiaryRequest"
+      responses:
+        "201":
+          description: Odbiorca dodany
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Beneficiary"
+        "200":
+          description: Powtórzone żądanie (ten sam `Idempotency-Key`) — oryginalny odbiorca
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Beneficiary"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422":
+          description: "Reguła biznesowa odrzuciła odbiorcę. `type`: `invalid-iban`."
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+
+  /me/beneficiaries/{beneficiaryId}:
+    parameters:
+      - $ref: "#/components/parameters/BeneficiaryId"
+    delete:
+      tags: [customer]
+      operationId: deleteMyBeneficiary
+      x-roles: [CUSTOMER]
+      summary: Usunięcie odbiorcy z książki
+      description: |
+        Usuwa wpis książki adresowej. Powtórzenie jest idempotentne (`204`). Odbiorca innego klienta → `404`.
+        Nowe w v0.4.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: Usunięty
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /me/accounts/{accountId}/statements:
+    parameters:
+      - $ref: "#/components/parameters/AccountId"
+    get:
+      tags: [customer]
+      operationId: listMyAccountStatements
+      x-roles: [CUSTOMER]
+      summary: Wyciągi miesięczne rachunku
+      description: |
+        Etap 9 (`docs/architecture.md` §6). Lista wygenerowanych wyciągów, najnowszy pierwszy; jeden wyciąg na
+        pełny miesiąc kalendarzowy zamknięty przez EOD. Salda pochodzą z postingów księgi. Obcy rachunek → `404`.
+        Nowe w v0.4.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Strona wyciągów
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatementPage"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /me/accounts/{accountId}/statements/{period}.pdf:
+    parameters:
+      - $ref: "#/components/parameters/AccountId"
+      - $ref: "#/components/parameters/StatementPeriod"
+    get:
+      tags: [customer]
+      operationId: downloadMyAccountStatement
+      x-roles: [CUSTOMER]
+      summary: Wyciąg miesięczny w PDF
+      description: |
+        Etap 9. Zwraca PDF wyciągu za `period` (`yyyy-MM`). Miesiąc bez wyciągu (jeszcze niezamknięty przez EOD
+        albo rachunek otwarty później) → `404`. Nowe w v0.4.
+      responses:
+        "200":
+          description: Plik PDF wyciągu
+          headers:
+            Content-Disposition:
+              description: "Załącznik z nazwą `wyciag-<iban>-<period>.pdf`"
+              schema: { type: string }
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400": { $ref: "#/components/responses/Validation" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -856,6 +1084,11 @@ paths:
           required: false
           schema: { type: string, format: uuid }
           description: Rachunek nadawcy lub odbiorcy
+        - name: standingOrderId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+          description: Tylko wykonania tego zlecenia stałego (nowe w v0.4)
         - name: customerId
           in: query
           required: false
@@ -1426,6 +1659,199 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  # ───────────────────────────── operator / admin: nowe w v0.4 ─────────────────────────────
+
+  /customers/{customerId}/standing-orders:
+    parameters:
+      - $ref: "#/components/parameters/CustomerId"
+    get:
+      tags: [operator]
+      operationId: listCustomerStandingOrders
+      x-roles: [OPERATOR, ADMIN]
+      summary: Zlecenia stałe klienta
+      description: |
+        Widok operatora na `standing_order` klienta (Klient 360). Ten sam kształt, co `[customer]
+        GET /me/standing-orders`; porządek `nextRunDate` rosnąco, tie-break `id` malejąco. Wykonania zlecenia
+        znajdziesz przez `GET /payments?standingOrderId=`. Nowe w v0.4.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/StandingOrderStatus"
+          description: Filtr po statusie zlecenia
+      responses:
+        "200":
+          description: Strona zleceń stałych klienta
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandingOrderPage"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /accounts/{accountId}/fees:
+    parameters:
+      - $ref: "#/components/parameters/AccountId"
+    post:
+      tags: [operator]
+      operationId: chargeAccountFee
+      x-roles: [ADMIN]
+      summary: Ręczne naliczenie opłaty na rachunku
+      description: |
+        Etap 9 (`docs/architecture.md` §6). Księguje zapis `FEE`: obciążenie subkonta rachunku `2000-<accountId>`
+        i uznanie `4200` (przychód z opłat), kwotą z `FeeDefinition.amount` produktu rachunku. `feeCode` spoza
+        cennika produktu → `422` `validation`; rachunek `CLOSED` albo dzień inny niż `OPEN` → `422`
+        (`business-day-closed`). `reason` trafia do audytu; wpis jest `flagged` jak każde ręczne księgowanie.
+        Nowe w v0.4.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChargeFeeRequest"
+      responses:
+        "201":
+          description: Zapis księgowy opłaty
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntry"
+        "200":
+          description: Powtórzone żądanie (ten sam `Idempotency-Key`) — oryginalny zapis
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntry"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422":
+          description: "`validation` (nieznany `feeCode`), `business-day-closed`, `conflict` stanu rachunku"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+
+  /audit:
+    get:
+      tags: [operator]
+      operationId: listAuditEntries
+      x-roles: [OPERATOR, ADMIN]
+      summary: Dziennik audytu komend
+      description: |
+        Append-only dziennik mutujących żądań `/api/v1` (`docs/domain-model.md` §3 `audit_log`), porządek
+        `occurredAt` malejąco, tie-break `id` malejąco. `ADMIN` widzi wszystkie wpisy. `OPERATOR` widzi wyłącznie
+        wpisy agregatów, do których ma dostęp przez własne endpointy (`aggregateType` ∈ `customers`, `accounts`,
+        `payments`) oraz własne wpisy (`actor.sub` = jego `sub`); wpisy `ledger`, `interest`, `business-days`
+        i `jobs` są dla niego niewidoczne — filtrowanie jest w warstwie serwisu, nie w kontrolerze.
+        Wpisy księgowe (ręczne zapisy i storna) mają `flagged: true`. Nowe w v0.4.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: actor
+          in: query
+          required: false
+          description: Filtr po `sub` aktora (dokładne dopasowanie)
+          schema: { type: string, maxLength: 255 }
+        - name: aggregateType
+          in: query
+          required: false
+          description: "Filtr po rodzaju agregatu (pierwszy segment ścieżki po `/api/v1`, np. `payments`, `ledger`)"
+          schema: { type: string, maxLength: 64 }
+        - name: aggregateId
+          in: query
+          required: false
+          description: Filtr po identyfikatorze agregatu (pierwsza zmienna ścieżki); wymaga `aggregateType`
+          schema: { type: string, maxLength: 64 }
+        - name: from
+          in: query
+          required: false
+          description: Najwcześniejsza chwila `occurredAt` (włącznie)
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: false
+          description: Najpóźniejsza chwila `occurredAt` (włącznie)
+          schema: { type: string, format: date-time }
+        - name: flagged
+          in: query
+          required: false
+          description: "`true` = tylko wpisy oflagowane (księgowe)"
+          schema: { type: boolean }
+      responses:
+        "200":
+          description: Strona dziennika audytu
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditEntryPage"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /ops/consumers:
+    get:
+      tags: [admin]
+      operationId: listConsumerGroupLag
+      x-roles: [ADMIN]
+      summary: Lag grup konsumentów szyny
+      description: |
+        Odczyt przez Kafka `AdminClient` (`docs/adr/ADR-007-*`), bez paginacji — zbiór grup i partycji jest mały
+        i znany z `docs/integration-contracts.md` §4. Broker niedostępny → `503` `upstream-unavailable`.
+        Diagnostyka, nie stan banku: core-api nie zmienia tu niczego. Nowe w v0.4.
+      responses:
+        "200":
+          description: Lag per grupa, temat i partycja
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ConsumerGroupLag"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "503": { $ref: "#/components/responses/UpstreamUnavailable" }
+
+  /ops/dlq:
+    get:
+      tags: [admin]
+      operationId: listDlqMessages
+      x-roles: [ADMIN]
+      summary: Wiadomości w kolejkach DLQ
+      description: |
+        Podgląd tematów `bank.<domena>.v1.dlq` (`docs/integration-contracts.md` §4). Tylko odczyt: nie ma
+        ponawiania ani kasowania z poziomu API. `payload` zwracany jako tekst (surowy JSON wiadomości), bez
+        interpretacji. Porządek: `receivedAt` malejąco. Broker niedostępny → `503` `upstream-unavailable`.
+        Nowe w v0.4.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: topic
+          in: query
+          required: false
+          description: "Nazwa tematu DLQ, np. `bank.payments.v1.dlq`; brak = wszystkie"
+          schema: { type: string, maxLength: 255 }
+      responses:
+        "200":
+          description: Strona wiadomości DLQ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DlqMessagePage"
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "503": { $ref: "#/components/responses/UpstreamUnavailable" }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1520,6 +1946,26 @@ components:
       required: true
       schema: { type: string, format: uuid }
 
+    NotificationId:
+      name: notificationId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    BeneficiaryId:
+      name: beneficiaryId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    StatementPeriod:
+      name: period
+      in: path
+      required: true
+      description: Miesiąc wyciągu w formacie `yyyy-MM`; niepasujący do wzorca → `400` `validation`
+      schema:
+        type: string
+        pattern: "^[0-9]{4}-(0[1-9]|1[0-2])$"
+        examples: ["2026-08"]
+
   responses:
     Validation:
       description: Błąd walidacji żądania (`type` = `validation`, pole `errors`)
@@ -1547,6 +1993,15 @@ components:
             $ref: "#/components/schemas/Problem"
     Conflict:
       description: "`conflict` (wersja / stan) albo `duplicate-request` (ten sam `Idempotency-Key`, inne ciało)"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+
+    UpstreamUnavailable:
+      description: |
+        Zależność zewnętrzna core-api (dziś: broker szyny) nie odpowiada — `type` = `upstream-unavailable`.
+        Stan banku jest nienaruszony; żądanie można powtórzyć. Nowe w v0.4, tylko `/ops/*`.
       content:
         application/problem+json:
           schema:
@@ -1679,6 +2134,24 @@ components:
           description: Suma aktywnych blokad (≥ 0)
         openedOn: { type: string, format: date }
         closedOn: { type: string, format: date }
+        accruedInterest:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+          description: |
+            Odsetki naliczone od ostatniej kapitalizacji, jeszcze nieprzeniesione na rachunek (`docs/business-rules.md`
+            §7). Brutto, przed podatkiem. Nie wchodzą do `balance` ani do `availableBalance`. Nowe w v0.4.
+        rateScheduleId:
+          type: string
+          format: uuid
+          description: |
+            Harmonogram stóp obowiązujący dla produktu rachunku na bieżącą datę biznesową (`IN_FORCE`). Wyliczany
+            przy odczycie — stopa nie jest przypinana do rachunku. Nowe w v0.4.
+        nextCapitalizationDate:
+          type: string
+          format: date
+          description: |
+            Najbliższa data kapitalizacji wynikająca z `Product.capitalization`; brak dla produktów
+            z `capitalization: NONE`. Nowe w v0.4.
         version:
           type: integer
           format: int64
@@ -1807,6 +2280,12 @@ components:
         clearingRef:
           type: string
           description: Referencja izby dla płatności zewnętrznych po rozliczeniu
+        standingOrderId:
+          type: string
+          format: uuid
+          description: |
+            Zlecenie stałe, którego wykonaniem jest ta płatność (kolumna `payment.standing_order_id`); brak dla
+            przelewów jednorazowych. Nowe w v0.4.
         confirmation:
           $ref: "#/components/schemas/PaymentConfirmationInfo"
         createdAt: { type: string, format: date-time }
@@ -1999,6 +2478,13 @@ components:
           description: |
             Harmonogram bazowy produktu (seed). Stopa NIE jest przypinana do rachunku: dla każdego dnia naliczenia
             obowiązuje harmonogram produktu o największym `effectiveFrom ≤ businessDate` (`docs/business-rules.md` §7).
+        currentRate:
+          $ref: "#/components/schemas/ProductRate"
+        fees:
+          type: array
+          description: Cennik produktu (etap 9); brak pola = produkt bez opłat. Nowe w v0.4.
+          items:
+            $ref: "#/components/schemas/FeeDefinition"
 
     ProductPage:
       type: object
@@ -2635,3 +3121,364 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ReconciliationCheck"
+
+    # ───────────────────────────── nowe w v0.4 ─────────────────────────────
+
+    PublicRateTier:
+      type: object
+      description: |
+        Próg marginalny w widoku klienta — ten sam próg co `RateTier`, ale z górną granicą jako `Money`
+        (kwota zawsze niesie walutę, `CLAUDE.md` §5). Ostatni próg ma `upTo: null`.
+      required: [upTo, annualRateBp]
+      properties:
+        upTo:
+          oneOf:
+            - $ref: "#/components/schemas/Money"
+            - type: "null"
+          description: Górna granica progu; `null` = bez górnej granicy
+        annualRateBp:
+          type: integer
+          minimum: 0
+          maximum: 100000
+          description: Stopa roczna w punktach bazowych (500 = 5,00 %)
+
+    ProductRate:
+      type: object
+      description: |
+        Harmonogram stóp produktu obowiązujący na bieżącą datę biznesową (`RateSchedule` o statusie `IN_FORCE`),
+        okrojony do tego, co widzi klient: bez id, autora i `effectiveTo`.
+      required: [effectiveFrom, tiers]
+      properties:
+        effectiveFrom:
+          type: string
+          format: date
+          description: Data, od której obowiązuje ten harmonogram
+        tiers:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/PublicRateTier"
+        dayCount:
+          $ref: "#/components/schemas/DayCount"
+
+    FeeTrigger:
+      type: string
+      description: |
+        Moment naliczenia opłaty. `MONTHLY` — przy zamknięciu ostatniego dnia roboczego miesiąca (EOD);
+        `PER_TRANSFER_OUT` — przy zaksięgowaniu przelewu wychodzącego. Etap 9.
+      enum: [MONTHLY, PER_TRANSFER_OUT]
+
+    FeeDefinition:
+      type: object
+      description: Pozycja cennika produktu (etap 9). Księgowana jako zapis `FEE` na `4200`.
+      required: [code, name, amount, trigger]
+      properties:
+        code: { type: string, examples: [MONTHLY_MAINTENANCE] }
+        name: { type: string, examples: ["Opłata za prowadzenie rachunku"] }
+        amount:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+          description: Kwota opłaty, dodatnia, w walucie produktu
+        trigger:
+          $ref: "#/components/schemas/FeeTrigger"
+
+    AuditOutcome:
+      type: string
+      description: "`SUCCEEDED` (2xx), `REJECTED` (4xx), `FAILED` (5xx)"
+      enum: [SUCCEEDED, REJECTED, FAILED]
+
+    AuditActor:
+      type: object
+      description: Kto wywołał komendę. `sub` = claim tokenu; brak = wywołanie systemowe (batch).
+      required: [roles]
+      properties:
+        sub:
+          type: [string, "null"]
+          description: Claim `sub` z JWT; `null` dla komend systemowych
+        roles:
+          type: array
+          description: Role realmu aktora z chwili wywołania
+          items: { type: string }
+          examples: [["OPERATOR"]]
+
+    AuditEntry:
+      type: object
+      description: |
+        Wpis dziennika audytu (`audit.audit_log`, `docs/domain-model.md` §3). Append-only: nigdy nie jest
+        modyfikowany ani usuwany. Nie zawiera PII poza `sub` aktora.
+      required: [id, occurredAt, actor, action, aggregateType, outcome, httpStatus, flagged]
+      properties:
+        id: { type: string, format: uuid }
+        occurredAt:
+          type: string
+          format: date-time
+          description: Chwila zapisu wpisu (UTC)
+        actor:
+          $ref: "#/components/schemas/AuditActor"
+        action:
+          type: string
+          description: |
+            Komenda w postaci `METODA <wzorzec ścieżki z kontraktu>` — dokładnie to, co zapisuje `audit.audit_log`.
+          examples: ["POST /api/v1/payments/{paymentId}/return", "POST /api/v1/ledger/entries:manual"]
+        path:
+          type: string
+          description: Konkretna ścieżka żądania (z podstawionymi identyfikatorami)
+          examples: ["/api/v1/payments/0199bf1e-0000-7000-8000-000000000001/return"]
+        aggregateType:
+          type: string
+          description: "Pierwszy segment po `/api/v1` (`payments`, `accounts`, `ledger`, `me`…)"
+          examples: [payments]
+        aggregateId:
+          type: [string, "null"]
+          description: Pierwsza zmienna ścieżki (`paymentId`, `accountId`…); `null` dla utworzeń
+        outcome:
+          $ref: "#/components/schemas/AuditOutcome"
+        httpStatus:
+          type: integer
+          description: Status odpowiedzi HTTP
+          examples: [200]
+        reason:
+          type: [string, "null"]
+          description: Pole `reason` z ciała komendy, jeśli było (mutacje operatora/ADMIN)
+        correlationId:
+          type: [string, "null"]
+          format: uuid
+          description: Id korelacji żądania — łączy wpis z logami i kopertą zdarzenia
+        flagged:
+          type: boolean
+          description: "`true` dla komend księgowych (ręczny zapis, storno, opłata) — `docs/business-rules.md` §9"
+
+    AuditEntryPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEntry"
+        nextCursor:
+          type: [string, "null"]
+
+    Notification:
+      type: object
+      description: |
+        Powiadomienie w aplikacji — projekcja zdarzenia z szyny dla jednego klienta (`docs/adr/ADR-008-*`).
+        Nie jest źródłem prawdy: pełne dane są pod `refs` przez odpowiednie zasoby `/me/*`.
+      required: [id, type, occurredAt, title, readAt]
+      properties:
+        id: { type: string, format: uuid }
+        type:
+          type: string
+          description: |
+            `type` zdarzenia z katalogu `docs/integration-contracts.md` §4 / `asyncapi/asyncapi.yaml`.
+            Celowo `string`, a nie enum: konsument toleruje nieznane typy, a katalog rośnie addytywnie.
+          examples: [payment.settled]
+        occurredAt:
+          type: string
+          format: date-time
+          description: "`occurredAt` koperty zdarzenia (UTC), nie chwila zapisu projekcji"
+        title:
+          type: string
+          description: Krótki nagłówek dla UI (już zlokalizowany po polsku)
+          examples: ["Przelew rozliczony"]
+        body:
+          type: string
+          description: Treść dla UI; bez PII poza nazwą kontrahenta widoczną i tak w płatności
+        readAt:
+          type: [string, "null"]
+          format: date-time
+          description: "`null` = nieprzeczytane"
+        refs:
+          $ref: "#/components/schemas/NotificationRefs"
+
+    NotificationRefs:
+      type: object
+      description: Identyfikatory zasobów, do których UI linkuje z powiadomienia. Wszystkie opcjonalne.
+      properties:
+        paymentId: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        standingOrderId: { type: string, format: uuid }
+
+    NotificationPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Notification"
+        nextCursor:
+          type: [string, "null"]
+        unreadCount:
+          type: integer
+          minimum: 0
+          description: Liczba nieprzeczytanych powiadomień klienta (niezależna od strony i filtra)
+
+    Beneficiary:
+      type: object
+      description: Wpis książki odbiorców klienta. Wyłącznie wygoda UI — nie wpływa na płatności ani na księgę.
+      required: [id, name, iban, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        name:
+          type: string
+          description: Nazwa nadana przez klienta
+          examples: ["Jan Kowalski"]
+        iban:
+          type: string
+          description: IBAN odbiorcy bez spacji
+        createdAt: { type: string, format: date-time }
+
+    BeneficiaryPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Beneficiary"
+        nextCursor:
+          type: [string, "null"]
+
+    CreateBeneficiaryRequest:
+      type: object
+      required: [name, iban]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 140
+        iban:
+          type: string
+          minLength: 15
+          maxLength: 34
+          description: IBAN bez spacji; walidacja mod 97 po stronie serwera (`invalid-iban`)
+
+    ConsumerGroupLag:
+      type: object
+      description: |
+        Lag jednej partycji jednej grupy konsumentów (`docs/integration-contracts.md` §4). Wyłącznie diagnostyka.
+      required: [groupId, topic, partition, currentOffset, endOffset, lag]
+      properties:
+        groupId:
+          type: string
+          examples: [notifications]
+        topic:
+          type: string
+          examples: [bank.payments.v1]
+        partition:
+          type: integer
+          minimum: 0
+        currentOffset:
+          type: integer
+          format: int64
+          description: Ostatni zatwierdzony offset grupy; `-1`, gdy grupa nie zatwierdziła jeszcze nic
+        endOffset:
+          type: integer
+          format: int64
+          description: Offset końca logu partycji
+        lag:
+          type: integer
+          format: int64
+          minimum: 0
+          description: "`endOffset − currentOffset`"
+
+    DlqMessage:
+      type: object
+      description: Wiadomość w temacie `bank.<domena>.v1.dlq` wraz z nagłówkami wyjątku Spring Kafka.
+      required: [topic, partition, offset, receivedAt]
+      properties:
+        topic:
+          type: string
+          examples: [bank.payments.v1.dlq]
+        partition:
+          type: integer
+          minimum: 0
+        offset:
+          type: integer
+          format: int64
+        key:
+          type: [string, "null"]
+          description: Klucz wiadomości (`aggregateId` oryginału)
+        headers:
+          type: object
+          description: Nagłówki Kafka jako tekst; wartości binarne w Base64
+          additionalProperties: { type: string }
+        payload:
+          type: string
+          description: Surowe ciało wiadomości jako tekst (JSON koperty) — API go nie interpretuje
+        exceptionMessage:
+          type: [string, "null"]
+          description: Nagłówek `kafka_dlt-exception-message` oryginalnej porażki
+        receivedAt:
+          type: string
+          format: date-time
+          description: Znacznik czasu rekordu w DLQ
+
+    DlqMessagePage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DlqMessage"
+        nextCursor:
+          type: [string, "null"]
+
+    Statement:
+      type: object
+      description: |
+        Wyciąg miesięczny rachunku (etap 9). Salda są wyliczone z postingów na subkoncie GL rachunku
+        na pierwszy i ostatni dzień okresu.
+      required: [accountId, period, openingBalance, closingBalance, transactionsCount, generatedAt]
+      properties:
+        accountId: { type: string, format: uuid }
+        period:
+          type: string
+          pattern: "^[0-9]{4}-(0[1-9]|1[0-2])$"
+          description: Miesiąc wyciągu `yyyy-MM`
+          examples: ["2026-08"]
+        openingBalance:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+          description: Saldo na początek okresu, z perspektywy klienta
+        closingBalance:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+          description: Saldo na koniec okresu, z perspektywy klienta
+        transactionsCount:
+          type: integer
+          minimum: 0
+          description: Liczba pozycji historii w okresie
+        generatedAt:
+          type: string
+          format: date-time
+          description: Chwila wygenerowania PDF przez EOD
+
+    StatementPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Statement"
+        nextCursor:
+          type: [string, "null"]
+
+    ChargeFeeRequest:
+      type: object
+      description: Ręczne naliczenie opłaty z cennika produktu rachunku (etap 9). Kwota bierze się z `FeeDefinition`.
+      required: [feeCode, reason]
+      properties:
+        feeCode:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: "`FeeDefinition.code` z cennika produktu tego rachunku"
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 280
+          description: Uzasadnienie administratora (trafia do audytu)
