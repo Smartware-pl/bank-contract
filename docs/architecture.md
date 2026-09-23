@@ -147,6 +147,7 @@ Jeden etap na sesję Claude Code / PR. Etap jest gotowy, gdy jego DoD przechodzi
 | 7 | `bank-clearing-sim` + przelewy zewnętrzne w `core-api` (konsument `bank.clearing.v1` z inboxem, storno przy zwrocie, uznanie przy przychodzącym) | Przelew wychodzący kończy w `SETTLED` lub `RETURNED` bez żadnego HTTP między aplikacjami; przelew przychodzący uznaje rachunek; duplikat zdarzenia nie księguje dwa razy |
 | 8 | `backoffice-web`: klienci, rachunki, ręczne księgowanie, przeglądarka GL, wyzwalacz EOD | Operator zamyka dzień z UI i widzi zapisy naliczeń |
 | 9 | Wyciągi (PDF), opłaty, metryki, lag konsumentów w health; opcjonalnie SSE statusu płatności dla UI | System działa bez nadzoru przez symulowany miesiąc bez rozjazdów w uzgodnieniu i bez rosnącego lagu |
+| 10 | Kontrakt v0.4 (F4 frontów): `GET /audit` nad istniejącym `audit.audit_log`, odsetki i `/me/products` dla klienta, `standingOrderId` w płatnościach i zlecenia stałe klienta dla operatora, `/me/notifications` (projekcja zdarzeń, ADR-008), `/me/beneficiaries`, `/ops/consumers` i `/ops/dlq` (AdminClient, ADR-007). Wyciągi, cennik i `POST /accounts/{id}/fees` z tego kontraktu realizuje etap 9 | Backoffice pokazuje wpis audytu po zwrocie płatności i lag grup konsumentów; klient widzi naliczone odsetki i powiadomienie o kapitalizacji po fast-forwardzie; żaden nowy endpoint nie zapisuje niczego do księgi poza `/accounts/{id}/fees` |
 
 ## 7. Świadome uproszczenia
 
