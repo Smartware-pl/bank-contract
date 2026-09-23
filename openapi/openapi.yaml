@@ -1704,10 +1704,12 @@ paths:
       summary: Ręczne naliczenie opłaty na rachunku
       description: |
         Etap 9 (`docs/architecture.md` §6). Księguje zapis `FEE`: obciążenie subkonta rachunku `2000-<accountId>`
-        i uznanie `4200` (przychód z opłat), kwotą z `FeeDefinition.amount` produktu rachunku. `feeCode` spoza
-        cennika produktu → `422` `validation`; rachunek `CLOSED` albo dzień inny niż `OPEN` → `422`
-        (`business-day-closed`). `reason` trafia do audytu; wpis jest `flagged` jak każde ręczne księgowanie.
-        Nowe w v0.4.
+        i uznanie `4200` (przychód z opłat), kwotą z `FeeDefinition.amount` produktu rachunku.
+        Błędy: `feeCode` spoza cennika produktu → `422` `validation`; rachunek w statusie blokującym obciążenie
+        (`CLOSED`) → `409` `conflict` z `extensions.status`; saldo dostępne nie pokrywa opłaty → `422`
+        `insufficient-funds` z `extensions.available`; dzień roboczy nie `OPEN` → `422` `business-day-closed`
+        (wzór jak `POST /ledger/entries:manual` i `POST /payments/{paymentId}/return`).
+        `reason` trafia do audytu. Nowe w v0.4.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -1735,7 +1737,7 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "422":
-          description: "`validation` (nieznany `feeCode`), `business-day-closed`, `conflict` stanu rachunku"
+          description: "`validation` (nieznany `feeCode`), `insufficient-funds`, `business-day-closed`"
           content:
             application/problem+json:
               schema:
@@ -1749,11 +1751,13 @@ paths:
       summary: Dziennik audytu komend
       description: |
         Append-only dziennik mutujących żądań `/api/v1` (`docs/domain-model.md` §3 `audit_log`), porządek
-        `occurredAt` malejąco, tie-break `id` malejąco. `ADMIN` widzi wszystkie wpisy. `OPERATOR` widzi wyłącznie
-        wpisy agregatów, do których ma dostęp przez własne endpointy (`aggregateType` ∈ `customers`, `accounts`,
-        `payments`) oraz własne wpisy (`actor.sub` = jego `sub`); wpisy `ledger`, `interest`, `business-days`
-        i `jobs` są dla niego niewidoczne — filtrowanie jest w warstwie serwisu, nie w kontrolerze.
-        Wpisy księgowe (ręczne zapisy i storna) mają `flagged: true`. Nowe w v0.4.
+        `occurredAt` malejąco, tie-break `id` malejąco. `ADMIN` widzi wszystkie wpisy. `OPERATOR` widzi wpisy
+        o `aggregateType` ∈ `customers`, `accounts`, `payments`, `me` (bez zawężania do konkretnych klientów —
+        OPERATOR i tak widzi wszystkich klientów przez własne endpointy; `me` to komendy klientów, bo `aggregateType`
+        jest pierwszym segmentem ścieżki) oraz wpisy, których sam jest aktorem (`actor.sub` = jego `sub`);
+        wpisy `ledger`, `interest`, `business-days` i `jobs` są dla niego niewidoczne — filtrowanie jest w warstwie
+        serwisu, nie w kontrolerze. `flagged: true` mają wyłącznie komendy `/ledger/*` (ręczne zapisy i storna
+        księgowe) — stan faktyczny filtra audytu w core-api. Nowe w v0.4.
       parameters:
         - $ref: "#/components/parameters/Cursor"
         - $ref: "#/components/parameters/Limit"
@@ -1765,7 +1769,7 @@ paths:
         - name: aggregateType
           in: query
           required: false
-          description: "Filtr po rodzaju agregatu (pierwszy segment ścieżki po `/api/v1`, np. `payments`, `ledger`)"
+          description: "Filtr po rodzaju agregatu (pierwszy segment ścieżki po `/api/v1`: `payments`, `accounts`, `customers`, `ledger`, `me`…)"
           schema: { type: string, maxLength: 64 }
         - name: aggregateId
           in: query
@@ -1785,7 +1789,7 @@ paths:
         - name: flagged
           in: query
           required: false
-          description: "`true` = tylko wpisy oflagowane (księgowe)"
+          description: "`true` = tylko wpisy oflagowane (dziś: komendy `/ledger/*`)"
           schema: { type: boolean }
       responses:
         "200":
@@ -1805,18 +1809,17 @@ paths:
       x-roles: [ADMIN]
       summary: Lag grup konsumentów szyny
       description: |
-        Odczyt przez Kafka `AdminClient` (`docs/adr/ADR-007-*`), bez paginacji — zbiór grup i partycji jest mały
-        i znany z `docs/integration-contracts.md` §4. Broker niedostępny → `503` `upstream-unavailable`.
-        Diagnostyka, nie stan banku: core-api nie zmienia tu niczego. Nowe w v0.4.
+        Odczyt przez Kafka `AdminClient` (`docs/adr/ADR-007-*`). Odpowiedź ma kopertę strony jak każda lista
+        w tym API, ale `nextCursor` jest zawsze `null`: zbiór grup i partycji jest mały i znany z
+        `docs/integration-contracts.md` §4, więc nie ma czego stronicować. Broker niedostępny → `503`
+        `upstream-unavailable`. Diagnostyka, nie stan banku: core-api nie zmienia tu niczego. Nowe w v0.4.
       responses:
         "200":
-          description: Lag per grupa, temat i partycja
+          description: "Lag per grupa, temat i partycja (jedna strona, `nextCursor` = `null`)"
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/ConsumerGroupLag"
+                $ref: "#/components/schemas/ConsumerGroupLagPage"
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "503": { $ref: "#/components/responses/UpstreamUnavailable" }
@@ -1829,9 +1832,11 @@ paths:
       summary: Wiadomości w kolejkach DLQ
       description: |
         Podgląd tematów `bank.<domena>.v1.dlq` (`docs/integration-contracts.md` §4). Tylko odczyt: nie ma
-        ponawiania ani kasowania z poziomu API. `payload` zwracany jako tekst (surowy JSON wiadomości), bez
-        interpretacji. Porządek: `receivedAt` malejąco. Broker niedostępny → `503` `upstream-unavailable`.
-        Nowe w v0.4.
+        ponawiania ani kasowania z poziomu API. `payload` zwracany jako tekst, **z zamaskowanymi polami
+        wrażliwymi**: `payload.code` zdarzenia `payment.confirmation_requested` (jedyny payload z sekretem
+        w katalogu §4) wraca jako `"***"`. Maskowanie jest po stronie serwera — kod potwierdzenia nie opuszcza
+        core-api ani nie trafia do logów. Porządek: `receivedAt` malejąco. Broker niedostępny → `503`
+        `upstream-unavailable`. Nowe w v0.4.
       parameters:
         - $ref: "#/components/parameters/Cursor"
         - $ref: "#/components/parameters/Limit"
@@ -2057,6 +2062,7 @@ components:
             Pola specyficzne dla slugu. Kwoty w `extensions` zawsze jako `Money` (`{minor,currency}`), nigdy gołe liczby.
             Znane: `available` (`insufficient-funds`), `attemptsLeft` (`confirmation-failed`), `jobRunId` (`conflict` przy EOD),
             `balance` (`conflict` przy zamykaniu rachunku z saldem ≠ 0).
+            Nowe w v0.4: `status` — status agregatu blokujący komendę (`conflict`, np. opłata na rachunku `CLOSED`).
           properties:
             available:
               $ref: "#/components/schemas/Money"
@@ -2068,6 +2074,9 @@ components:
             jobRunId:
               type: string
               format: uuid
+            status:
+              type: string
+              description: Status agregatu, który zablokował komendę (`conflict`) — np. `AccountStatus` rachunku
           additionalProperties: true
 
     FieldError:
@@ -3205,8 +3214,10 @@ components:
       type: object
       description: |
         Wpis dziennika audytu (`audit.audit_log`, `docs/domain-model.md` §3). Append-only: nigdy nie jest
-        modyfikowany ani usuwany. Nie zawiera PII poza `sub` aktora.
-      required: [id, occurredAt, actor, action, aggregateType, outcome, httpStatus, flagged]
+        modyfikowany ani usuwany. Nie zawiera PII poza `sub` aktora — z zastrzeżeniem, że `reason` to tekst wolny
+        operatora, którego kontrakt nie kontroluje (zasada „żadnego PII w logach", `CLAUDE.md` §5, obowiązuje
+        piszącego).
+      required: [id, occurredAt, actor, action, path, outcome, httpStatus, flagged]
       properties:
         id: { type: string, format: uuid }
         occurredAt:
@@ -3222,11 +3233,13 @@ components:
           examples: ["POST /api/v1/payments/{paymentId}/return", "POST /api/v1/ledger/entries:manual"]
         path:
           type: string
-          description: Konkretna ścieżka żądania (z podstawionymi identyfikatorami)
+          description: Konkretna ścieżka żądania (z podstawionymi identyfikatorami); kolumna `NOT NULL`
           examples: ["/api/v1/payments/0199bf1e-0000-7000-8000-000000000001/return"]
         aggregateType:
-          type: string
-          description: "Pierwszy segment po `/api/v1` (`payments`, `accounts`, `ledger`, `me`…)"
+          type: [string, "null"]
+          description: |
+            Pierwszy segment po `/api/v1` (`payments`, `accounts`, `customers`, `ledger`, `me`…); `me` oznacza komendę
+            klienta. Kolumna jest `NULL`-owalna, więc pole jest opcjonalne i może być `null`.
           examples: [payments]
         aggregateId:
           type: [string, "null"]
@@ -3239,14 +3252,20 @@ components:
           examples: [200]
         reason:
           type: [string, "null"]
-          description: Pole `reason` z ciała komendy, jeśli było (mutacje operatora/ADMIN)
+          description: |
+            Pole `reason` z ciała komendy, jeśli było (mutacje operatora/ADMIN). Tekst wolny operatora — bez PII
+            (zasada `CLAUDE.md` §5), ale kontrakt tego nie wymusza.
         correlationId:
           type: [string, "null"]
           format: uuid
           description: Id korelacji żądania — łączy wpis z logami i kopertą zdarzenia
         flagged:
           type: boolean
-          description: "`true` dla komend księgowych (ręczny zapis, storno, opłata) — `docs/business-rules.md` §9"
+          description: |
+            Stan faktyczny filtra audytu w core-api: `true` **wyłącznie** dla komend `/api/v1/ledger/*`
+            (ręczne księgowanie i storno księgowe, `docs/business-rules.md` §9). Zwrot płatności
+            (`POST /payments/{paymentId}/return`) i naliczenie opłaty (`POST /accounts/{accountId}/fees`)
+            księgują, ale dziś **nie** są oflagowane — rozszerzenie flagowania to osobna zmiana w core-api.
 
     AuditEntryPage:
       type: object
@@ -3362,9 +3381,13 @@ components:
       properties:
         groupId:
           type: string
+          description: |
+            Identyfikator grupy konsumentów z `docs/integration-contracts.md` §4 („Grupy konsumentów: `notifications`,
+            `clearing-sim`, `core-api-payments`") — ten sam, co `KAFKA_GROUP_ID` aplikacji w §6.
           examples: [notifications]
         topic:
           type: string
+          description: "Temat z tabeli tematów `docs/integration-contracts.md` §4"
           examples: [bank.payments.v1]
         partition:
           type: integer
@@ -3382,6 +3405,20 @@ components:
           format: int64
           minimum: 0
           description: "`endOffset − currentOffset`"
+
+    ConsumerGroupLagPage:
+      type: object
+      description: |
+        Koperta strony jak w każdej liście tego API; `nextCursor` jest tu zawsze `null` — zbiór grup i partycji
+        jest skończony i mały, więc zwracany jednorazowo.
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConsumerGroupLag"
+        nextCursor:
+          type: [string, "null"]
 
     DlqMessage:
       type: object
@@ -3406,7 +3443,9 @@ components:
           additionalProperties: { type: string }
         payload:
           type: string
-          description: Surowe ciało wiadomości jako tekst (JSON koperty) — API go nie interpretuje
+          description: |
+            Ciało wiadomości jako tekst (JSON koperty). API go nie interpretuje poza maskowaniem pól wrażliwych:
+            `payload.code` w zdarzeniu `payment.confirmation_requested` wraca jako `"***"`.
         exceptionMessage:
           type: [string, "null"]
           description: Nagłówek `kafka_dlt-exception-message` oryginalnej porażki

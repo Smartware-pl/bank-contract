@@ -96,7 +96,7 @@ Saldo konta nadrzędnego (np. `2000`) to roll-up: własne postingi + postingi ws
 - `notification(id, event_id, customer_id, channel[EMAIL], template, sent_at, status)`
 
 **audit**
-- `audit_log(id, actor_sub NULL, actor_roles, command, path, aggregate_type NULL, aggregate_id NULL, correlation_id NULL, outcome[SUCCEEDED|REJECTED|FAILED], http_status, reason NULL, flagged, at)` — append-only (trigger odrzuca UPDATE/DELETE). `command` to `METODA <wzorzec ścieżki z kontraktu>` (np. `POST /api/v1/ledger/entries:manual`), `path` to konkretna ścieżka żądania, `aggregate_type` to pierwszy segment po `/api/v1`, `aggregate_id` pierwsza zmienna ścieżki. `flagged` = komenda księgowa (zapis ręczny, storno, opłata). Od v0.4 wystawiane przez `GET /audit` jako `AuditEntry` (`command` → `action`, `at` → `occurredAt`, `actor_sub`/`actor_roles` → `actor{sub,roles}`)
+- `audit_log(id, actor_sub NULL, actor_roles, command, path, aggregate_type NULL, aggregate_id NULL, correlation_id NULL, outcome[SUCCEEDED|REJECTED|FAILED], http_status, reason NULL, flagged, at)` — append-only (trigger odrzuca UPDATE/DELETE). `command` to `METODA <wzorzec ścieżki z kontraktu>` (np. `POST /api/v1/ledger/entries:manual`), `path` to konkretna ścieżka żądania, `aggregate_type` to pierwszy segment po `/api/v1` (`ledger`, `accounts`, `payments`, `customers`, `me` dla komend klienta), `aggregate_id` pierwsza zmienna ścieżki. `flagged` = komenda `/api/v1/ledger/*` (ręczne księgowanie, storno księgowe) — i tylko ona; zwrot płatności i naliczenie opłaty księgują, ale dziś oflagowane nie są. Od v0.4 wystawiane przez `GET /audit` jako `AuditEntry` (`command` → `action`, `at` → `occurredAt`, `actor_sub`/`actor_roles` → `actor{sub,roles}`)
 
 ## 4. Maszyny stanów
 
