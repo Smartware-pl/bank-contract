@@ -31,8 +31,11 @@ Klienci:
 | `backoffice-web` | publiczny, PKCE | UI operatora |
 | `core-api` | bearer-only resource | walidacja tokenów |
 | `clearing-sim` | — | nie wywołuje core-api; brak klienta Keycloak (admin HTTP bez auth w dev) |
+| `staff-tools` | poufny, authorization code | tylko dev na AWS: ALB `authenticate-oidc` przed narzędziami bez własnego logowania (Mailpit, `clearing-sim` `/admin/*`, notifications, szyna) — dostęp człowieka z rolą `STAFF_TOOLS` (ADR-009) |
+| `e2e-runner` | poufny, wyłącznie `client_credentials` (service account) | tylko dev na AWS: harness e2e z zewnątrz (laptop testera, runner STS); konto serwisowe ma rolę `STAFF_TOOLS`, mapper audience dodaje `aud` = `staff-tools-gateway`; token weryfikuje bramka JWT przed Mailpit/izbą/notifications/szyną (ADR-009). Sekret w Secrets Manager `/bank/dev/keycloak/e2e-runner-client` |
 
 Role realmu: `CUSTOMER`, `OPERATOR`, `ADMIN`.
+Rola realmu `STAFF_TOOLS` (tylko dev na AWS, ADR-009) otwiera wyłącznie narzędzia dev za ALB OIDC / bramką JWT; aplikacje banku jej nie znają i nie daje żadnych uprawnień w `/api/v1` (nowe od 2026-09-28).
 Claimy tokenu, na których polega core-api: `sub` (mapuje na `customers.customer.keycloak_sub`), `realm_access.roles`, `email`.
 Czas życia access tokenu 5 min, refresh 30 min. Użytkownicy testowi tworzeni przez `bank-infra/keycloak/seed-users.sh`.
 W dev klienci publiczni `customer-web` i `backoffice-web` mają dodatkowo włączony Direct Access Grants (password grant) —
@@ -202,6 +205,8 @@ Idempotencja: `core-api` dedupuje po `id` koperty (inbox) **i** po `clearingRef`
 
 ### Admin clearing-sim (HTTP, tylko dev/testy, bez auth)
 
+Na dev na AWS (`https://izba.bank-dev.smart-env.pl`) te same ścieżki są za ALB OIDC (człowiek) albo bramką JWT (`Authorization: Bearer` z tokenem klienta `e2e-runner`) — §2, ADR-009. Sam clearing-sim nadal nie ma auth.
+
 `POST http://localhost:8090/admin/incoming` — body jak payload `clearing.incoming_received`; sim publikuje zdarzenie.
 `POST http://localhost:8090/admin/config` — `{ "settlementDelaySeconds": 10, "returnRatePercent": 5, "alwaysReturnIbans": ["PL…"] }`.
 `POST http://localhost:8090/admin/traffic` — `{ "incomingPerMinute": 2, "targetIbans": ["PL…"] }` — generator ruchu przychodzącego (do „system żyje").
@@ -220,6 +225,8 @@ Idempotencja: `core-api` dedupuje po `id` koperty (inbox) **i** po `clearingRef`
 | `SPRING_PROFILES_ACTIVE` | core-api | `api,batch` |
 | `BANK_CODE` | core-api | `10000000` (fikcyjny 8-cyfrowy numer rozliczeniowy) |
 | `NEXT_PUBLIC_*` | aplikacje web | patrz `.env.example` każdej aplikacji |
+
+Zmienne `E2E_*` (m.in. `E2E_MAILPIT_URL`, `E2E_KAFKA_HTTP_URL`, `E2E_TOOLS_CLIENT_ID`, `E2E_TOOLS_CLIENT_SECRET`) nie są konfiguracją aplikacji — to parametry harnessu testów w `bank-infra/e2e` (tryb zdalny przeciwko dev na AWS, ADR-009) i są opisane tam.
 
 ## 7. Porty i wersje, których nie zmienia się po cichu
 
